@@ -35,8 +35,7 @@
 
 | 章节 | 内容 | 说明 |
 |------|------|------|
-| [ch04-communication](./ch04-communication/README.md) | 通信模式实践 | 四种RDMA操作详解 |
-| [ch05-advanced](./ch05-advanced/README.md) | 高级主题 | RDMA CM、多线程、性能优化 |
+| [ch04-communication](./ch04-communication/README.md) | 通信模式实践 | 四种RDMA操作、RDMA CM、多线程、性能优化 |
 
 ---
 
@@ -55,7 +54,7 @@ ibv_devices
 ### 学习顺序
 
 ```
-ch00 → ch01 → ch02 → ch03 → ch04 → ch05
+ch00 → ch01 → ch02 → ch03 → ch04
 ```
 
 ---
@@ -117,11 +116,13 @@ ch00 → ch01 → ch02 → ch03 → ch04 → ch05
 - [x] RC模式Send/Recv
 - [x] ibv_post_send/recv/poll_cq
 
-### 阶段四：RDMA Write/Read与CM（2周）
+### 阶段四：高级主题（2周）
 
 - [x] RDMA Write：单边操作
 - [x] RDMA Read：从远端拉取
 - [x] RDMA_CM API
+- [x] 多线程RDMA
+- [x] 性能优化
 
 ---
 
@@ -133,8 +134,8 @@ ibv_get_device_list(&n)    // 获取设备列表
 ibv_open_device(dev)        // 打开设备
 ibv_alloc_pd(ctx)           // 创建保护域
 ibv_reg_mr(pd, buf, len, flags)  // 注册内存
-ibv_create_cq(ctx, depth)  // 创建完成队列
-ibv_create_qp(pd, &attr)   // 创建队列对
+ibv_create_cq(ctx, depth) // 创建完成队列
+ibv_create_qp(pd, &attr)  // 创建队列对
 ibv_modify_qp(qp, &attr, flags)  // 迁移QP状态
 
 // 数据传输
