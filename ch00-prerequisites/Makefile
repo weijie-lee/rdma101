@@ -1,17 +1,17 @@
-# Makefile for TCP examples
+# Makefile for basic concepts
 
 CC = gcc
 CFLAGS = -Wall -O2 -g
 
-all: tcp_server tcp_client
+all: 01_struct_pointer 02_polling_pattern
 
-tcp_server: tcp_server.c
+01_struct_pointer: 01_struct_pointer.c
 	$(CC) $(CFLAGS) -o $@ $<
 
-tcp_client: tcp_client.c
+02_polling_pattern: 02_polling_pattern.c
 	$(CC) $(CFLAGS) -o $@ $<
 
 clean:
-	rm -f tcp_server tcp_client
+	rm -f 01_struct_pointer 02_polling_pattern
 
 .PHONY: all clean

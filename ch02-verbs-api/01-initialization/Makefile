@@ -1,20 +1,15 @@
-# Makefile for RDMA examples
+# Makefile for resources
 
 CC = gcc
 CFLAGS = -Wall -O2 -g
-LDFLAGS = -libverbs -lrdmacm
+LDFLAGS = -libverbs
 
-TARGETS = rdma_init rdma_write
+all: 01_init_resources
 
-all: $(TARGETS)
-
-rdma_init: rdma_init.c
-	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
-
-rdma_write: rdma_write.c
+01_init_resources: 01_init_resources.c
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
 clean:
-	rm -f $(TARGETS)
+	rm -f 01_init_resources
 
 .PHONY: all clean

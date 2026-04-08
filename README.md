@@ -11,114 +11,117 @@
 **前置要求**：
 - C语言基础
 - Linux系统使用经验
-
-**学习路径**：
-
-```
-前置基础 → 环境搭建 → 资源初始化 → Send/Recv → Write/Read → 高级主题
-```
+- 目标：阿里云ECS + SoftRoCE环境
 
 ---
 
-## 📖 目录结构
+## 📖 章节目录
 
-### 快速开始
+### 预备阶段
 
-| 目录 | 说明 |
-|------|------|
-| [docs/](./docs/) | 文档目录 |
-| [src/](./src/) | 示例代码目录 |
+| 章节 | 内容 | 说明 |
+|------|------|------|
+| [ch00-prerequisites](./ch00-prerequisites/README.md) | 预备知识 | 环境搭建、C语言基础、Socket编程 |
 
-### 学习路径
+### 第一阶段：基础概念
 
-```
-docs/
-└── 00_environment.md          # 环境搭建指南
+| 章节 | 内容 | 说明 |
+|------|------|------|
+| [ch01-intro](./ch01-intro/README.md) | RDMA基础概念 | 理解RDMA是什么、为什么快 |
+| [ch02-verbs-api](./ch02-verbs-api/README.md) | Verbs API入门 | 掌握RDMA编程基本流程 |
+| [ch03-qp-mr](./ch03-qp-mr/README.md) | QP与MR深入 | 深入理解队列对和内存区域 |
 
-src/
-├── 01_basic_concepts/         # C语言前置基础
-│   ├── 01_struct_pointer.c   # 结构体和指针练习
-│   └── 02_polling_pattern.c  # 轮询模式练习
-│
-├── 02_resources/              # RDMA资源初始化
-│   └── 01_init_resources.c   # 六步初始化
-│
-└── 03_send_recv/              # 第一个RDMA程序
-    └── 01_loopback_send_recv.c # Send/Recv Loopback
-```
+### 第二阶段：通信实践
+
+| 章节 | 内容 | 说明 |
+|------|------|------|
+| [ch04-communication](./ch04-communication/README.md) | 通信模式实践 | 四种RDMA操作详解 |
+| [ch05-advanced](./ch05-advanced/README.md) | 高级主题 | RDMA CM、多线程、性能优化 |
 
 ---
 
 ## 🚀 快速开始
 
-### 1. 环境准备
+### 环境准备
 
 ```bash
-# 安装依赖
-sudo apt update
-sudo apt install -y libibverbs-dev librdmacm-dev build-essential
+# 1. 安装依赖
+sudo apt-get install libibverbs-dev librdmacm-dev
+
+# 2. 检查RDMA设备
+ibv_devices
 ```
 
-详见：[环境搭建文档](./docs/00_environment.md)
+### 学习顺序
 
-### 2. 编译运行示例
-
-```bash
-# 前置练习（不需要RDMA硬件）
-cd src/01_basic_concepts
-make
-./01_struct_pointer
-./02_polling_pattern
-
-# 资源初始化（需要RDMA环境）
-cd ../02_resources
-make
-./01_init_resources
-
-# Send/Recv程序
-cd ../03_send_recv
-make
-./01_loopback_send_recv
 ```
+ch00 → ch01 → ch02 → ch03 → ch04 → ch05
+```
+
+---
+
+## 📂 示例代码
+
+### ch00-prerequisites
+
+| 文件 | 说明 |
+|------|------|
+| `00_environment.md` | 环境搭建指南 |
+| `01_struct_pointer.c` | C语言：结构体指针练习 |
+| `02_polling_pattern.c` | C语言：轮询模式练习 |
+| `tcp_server.c` | Socket：TCP服务器 |
+| `tcp_client.c` | Socket：TCP客户端 |
+
+### ch02-verbs-api
+
+| 文件 | 说明 |
+|------|------|
+| `01-initialization/rdma_init.c` | 设备初始化 |
+| `01-initialization/01_init_resources.c` | 六步初始化 |
+| `02-qp-state/qp_state.c` | QP状态转换 |
+
+### ch04-communication
+
+| 文件 | 说明 |
+|------|------|
+| `01-rdma-write/rdma_write.c` | RDMA Write |
+| `02-send-recv/send_recv.c` | Send/Recv (跨机器) |
+| `02-send-recv/01_loopback_send_recv.c` | Send/Recv (Loopback) |
+| `03-rdma-read/rdma_read.c` | RDMA Read |
+| `04-atomic/atomic_ops.c` | 原子操作 |
 
 ---
 
 ## 📚 学习路径
 
-### 第一阶段：前置基础（1-2周）
+### 前置基础（1-2周）
 
 - [x] C语言：指针与内存管理
-- [x] 结构体填参 + 指针传递
+- [x] C语言：结构体填参 + 指针传递
 - [x] 网络概念：Client/Server模型
 
-### 第二阶段：环境搭建
-
-- [x] Ubuntu开发环境
-- [x] SoftRoCE配置（软件模拟）
-- [x] 验证ibv_devinfo
-
-### 第三阶段：RDMA概念与架构
+### 阶段一：概念与架构（1周）
 
 - [x] 为什么比TCP/IP快
 - [x] 三种技术：InfiniBand/RoCE/iWARP
 - [x] 核心对象：QP、CQ、MR、PD
 
-### 第四阶段：IBV Verbs资源初始化
+### 阶段二：资源初始化（2周）
 
 - [x] 六步初始化：device → pd → mr → cq → qp
 - [x] 内存注册：lkey/rkey
 - [x] QP状态机：RESET → INIT → RTR → RTS
 
-### 第五阶段：第一个RDMA程序
+### 阶段三：第一个RDMA程序（2-3周）
 
-- [x] RC模式Send/Recv Loopback
+- [x] RC模式Send/Recv
 - [x] ibv_post_send/recv/poll_cq
 
-### 第六阶段：RDMA Write/Read与CM
+### 阶段四：RDMA Write/Read与CM（2周）
 
-- [ ] RDMA Write：单边操作
-- [ ] RDMA Read：从远端拉取
-- [ ] RDMA_CM API
+- [x] RDMA Write：单边操作
+- [x] RDMA Read：从远端拉取
+- [x] RDMA_CM API
 
 ---
 
@@ -130,8 +133,8 @@ ibv_get_device_list(&n)    // 获取设备列表
 ibv_open_device(dev)        // 打开设备
 ibv_alloc_pd(ctx)           // 创建保护域
 ibv_reg_mr(pd, buf, len, flags)  // 注册内存
-ibv_create_cq(ctx, depth) // 创建完成队列
-ibv_create_qp(pd, &attr)  // 创建队列对
+ibv_create_cq(ctx, depth)  // 创建完成队列
+ibv_create_qp(pd, &attr)   // 创建队列对
 ibv_modify_qp(qp, &attr, flags)  // 迁移QP状态
 
 // 数据传输
@@ -156,13 +159,9 @@ ibv_close_device(ctx)
 ```
 设备 (device)
  └── 保护域 PD
- ├── 内存区 MR
- │ ├── lkey：本地访问
- │ └── rkey：远端访问
- ├── 完成队列 CQ
- └── 队列对 QP
-     ├── 发送队列 SQ
-     └── 接收队列 RQ
+     ├── 内存区 MR (lkey/rkey)
+     ├── 完成队列 CQ
+     └── 队列对 QP (SQ + RQ)
 ```
 
 ### QP状态机

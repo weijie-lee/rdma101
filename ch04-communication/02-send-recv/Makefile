@@ -1,15 +1,15 @@
-# Makefile for Send/Recv example
+# Makefile for send_recv
 
 CC = gcc
 CFLAGS = -Wall -O2 -g
 LDFLAGS = -libverbs
 
-all: send_recv
+all: 01_loopback_send_recv
 
-send_recv: send_recv.c
+01_loopback_send_recv: 01_loopback_send_recv.c
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
 clean:
-	rm -f send_recv
+	rm -f 01_loopback_send_recv
 
 .PHONY: all clean
