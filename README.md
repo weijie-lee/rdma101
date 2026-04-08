@@ -21,22 +21,22 @@
 
 | 章节 | 内容 | 描述 |
 |------|------|------|
-| [ch00-prerequisites](./ch00-prerequisites/README.md) | 预备知识 | Socket编程、网络基础 |
+| [ch00-prerequisites](./ch00-prerequisites/README.md) | 预备知识 | Socket编程、TCP/UDP、网络字节序、RDMA连接交换 |
 
 ### 第一阶段：基础概念
 
 | 章节 | 内容 | 描述 |
 |------|------|------|
-| [ch01-intro](./ch01-intro/README.md) | RDMA基础概念 | 理解RDMA是什么，为什么快 |
-| [ch02-verbs-api](./ch02-verbs-api/README.md) | Verbs API入门 | 掌握RDMA编程基本流程 |
+| [ch01-intro](./ch01-intro/README.md) | RDMA基础概念 | 理解RDMA是什么、为什么快、三种协议 |
+| [ch02-verbs-api](./ch02-verbs-api/README.md) | Verbs API入门 | 掌握RDMA编程基本流程、设备初始化、资源创建 |
 | [ch03-qp-mr](./ch03-qp-mr/README.md) | QP与MR深入 | 深入理解队列对和内存区域 |
 
 ### 第二阶段：通信实践
 
 | 章节 | 内容 | 描述 |
 |------|------|------|
-| [ch04-communication](./ch04-communication/README.md) | 通信模式实践 | 四种RDMA操作详解 |
-| [ch05-advanced](./ch05-advanced/README.md) | 高级主题 | RDMA CM、多线程、性能优化 |
+| [ch04-communication](./ch04-communication/README.md) | 通信模式实践 | 四种RDMA操作详解、完整示例 |
+| [ch05-advanced](./ch05-advanced/README.md) | 高级主题 | RDMA CM、多线程、性能优化、调试 |
 
 ---
 
@@ -52,7 +52,7 @@ sudo apt-get install libibverbs-dev librdmacm-dev
 ibv_devices
 
 # 3. 编译示例
-cd ch02-verbs-api/01-initialization
+cd ch00-prerequisites
 make
 ```
 
@@ -93,9 +93,12 @@ ch00-prerequisites → ch01-intro → ch02-verbs-api → ch03-qp-mr → ch04-com
 
 ## 📝 每章包含
 
+- **学习目标** - 明确要掌握的技能
 - **概念讲解** - 详细的原理说明
 - **代码示例** - 可运行的C代码
 - **图解说明** - 直观理解操作流程
+- **运行验证** - 测试步骤和预期输出
+- **常见错误** - 问题排查指南
 - **练习题** - 巩固知识点
 
 ---
@@ -124,11 +127,11 @@ ch00-prerequisites → ch01-intro → ch02-verbs-api → ch03-qp-mr → ch04-com
 
 | 概念 | 英文 | 说明 |
 |------|------|------|
-| 队列对 | QP | 通信基本单元 |
-| 内存区域 | MR | 注册的内存 |
+| 队列对 | QP | 通信基本单元 = SQ + RQ |
+| 内存区域 | MR | 注册的内存，含lkey/rkey |
 | 完成队列 | CQ | 操作完成通知 |
 | 工作请求 | WR | 提交的操作 |
-| 工作完成 | WC | 操作结果 |
+| 工作完成 | WC | 操作结果状态 |
 
 ---
 
@@ -137,12 +140,6 @@ ch00-prerequisites → ch01-intro → ch02-verbs-api → ch03-qp-mr → ch04-com
 - [NVIDIA RDMA Programming Manual](https://docs.nvidia.com/networking/display/rdmaawareprogrammingv17)
 - [RDMAmojo](https://www.rdmamojo.com/)
 - [Linux RDMA Documentation](https://www.kernel.org/doc/Documentation/infiniband/)
-
----
-
-## 📝 练习答案
-
-每章结尾的练习题答案请参考各章节目录。
 
 ---
 
