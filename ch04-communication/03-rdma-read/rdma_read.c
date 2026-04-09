@@ -65,15 +65,21 @@ int init_ctx(struct rdma_ctx *ctx)
 int qp_connect(struct rdma_ctx *ctx, uint32_t remote_qp, uint16_t remote_lid)
 {
     struct ibv_qp_attr attr;
-    
+
     /* INIT */
     memset(&attr, 0, sizeof(attr));
     attr.qp_state = IBV_QPS_INIT;
     attr.port_num = 1;
     attr.pkey_index = 0;
-    attr.qp_access_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ;
-    ibv_modify_qp(ctx->qp, &attr, IBV_QP_STATE);
-    
+    attr.qp_access_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
+                           IBV_ACCESS_REMOTE_READ;
+    if (ibv_modify_qp(ctx->qp, &attr,
+                      IBV_QP_STATE | IBV_QP_PKEY_INDEX |
+                      IBV_QP_PORT | IBV_QP_ACCESS_FLAGS) != 0) {
+        perror("QP RESET->INIT");
+        return -1;
+    }
+
     /* RTR */
     memset(&attr, 0, sizeof(attr));
     attr.qp_state = IBV_QPS_RTR;
@@ -85,8 +91,15 @@ int qp_connect(struct rdma_ctx *ctx, uint32_t remote_qp, uint16_t remote_lid)
     attr.ah_attr.dlid = remote_lid;
     attr.ah_attr.sl = 0;
     attr.ah_attr.port_num = 1;
-    ibv_modify_qp(ctx->qp, &attr, IBV_QP_STATE);
-    
+    if (ibv_modify_qp(ctx->qp, &attr,
+                      IBV_QP_STATE | IBV_QP_PATH_MTU |
+                      IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
+                      IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER |
+                      IBV_QP_AV) != 0) {
+        perror("QP INIT->RTR");
+        return -1;
+    }
+
     /* RTS */
     memset(&attr, 0, sizeof(attr));
     attr.qp_state = IBV_QPS_RTS;
@@ -95,20 +108,30 @@ int qp_connect(struct rdma_ctx *ctx, uint32_t remote_qp, uint16_t remote_lid)
     attr.retry_cnt = 7;
     attr.rnr_retry = 7;
     attr.max_rd_atomic = 1;
-    ibv_modify_qp(ctx->qp, &attr, IBV_QP_STATE);
-    
+    if (ibv_modify_qp(ctx->qp, &attr,
+                      IBV_QP_STATE | IBV_QP_SQ_PSN |
+                      IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
+                      IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC) != 0) {
+        perror("QP RTR->RTS");
+        return -1;
+    }
+
     return 0;
 }
 
 /* 执行RDMA Read */
 int rdma_read(struct rdma_ctx *ctx, uint64_t remote_addr, uint32_t remote_rkey)
 {
+    /*
+     * RDMA Read：本端发起，将远端 remote_addr 处的数据拉取到本地 recv_buf。
+     * recv_buf 已在 init_ctx() 中注册了 MR，lkey = ctx->mr->lkey。
+     */
     struct ibv_sge sge = {
-        .addr = (uint64_t)ctx->send_buf,
+        .addr = (uint64_t)ctx->recv_buf,
         .length = BUFFER_SIZE,
         .lkey = ctx->mr->lkey,
     };
-    
+
     struct ibv_send_wr wr = {
         .opcode = IBV_WR_RDMA_READ,
         .wr.rdma = { .remote_addr = remote_addr, .rkey = remote_rkey },
@@ -116,15 +139,22 @@ int rdma_read(struct rdma_ctx *ctx, uint64_t remote_addr, uint32_t remote_rkey)
         .num_sge = 1,
         .send_flags = IBV_SEND_SIGNALED,
     };
-    
+
     struct ibv_send_wr *bad;
-    ibv_post_send(ctx->qp, &wr, &bad);
-    
+    if (ibv_post_send(ctx->qp, &wr, &bad) != 0) {
+        perror("ibv_post_send (RDMA Read)");
+        return -1;
+    }
+
     /* 等待完成 */
     struct ibv_wc wc;
     while (ibv_poll_cq(ctx->cq, 1, &wc) == 0);
-    
-    return (wc.status == IBV_WC_SUCCESS) ? 0 : -1;
+
+    if (wc.status != IBV_WC_SUCCESS) {
+        fprintf(stderr, "RDMA Read WC error: %s\n", ibv_wc_status_str(wc.status));
+        return -1;
+    }
+    return 0;
 }
 
 /* 通过socket交换连接信息 */
@@ -134,25 +164,52 @@ void exchange_connection(struct rdma_ctx *ctx, const char *server_ip,
     local->qp_num = ctx->qp->qp_num;
     local->buf_addr = (uint64_t)ctx->recv_buf;
     local->buf_rkey = ctx->mr->rkey;
-    
+
     struct ibv_port_attr attr;
     ibv_query_port(ctx->ctx, 1, &attr);
     local->lid = attr.lid;
-    
+
     int sock = socket(AF_INET, SOCK_STREAM, 0);
-    struct sockaddr_in addr = { .sin_family = AF_INET, .sin_port = htons(8888) };
-    
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(8888);
+
     if (server_ip) {
         /* Client */
-        inet_pton(AF_INET, server_ip, &addr.sin_addr);
-        connect(sock, (struct sockaddr*)&addr, sizeof(addr));
+        if (inet_pton(AF_INET, server_ip, &addr.sin_addr) <= 0) {
+            fprintf(stderr, "Invalid server IP\n");
+            close(sock);
+            return;
+        }
+        if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            perror("connect");
+            close(sock);
+            return;
+        }
         send(sock, local, sizeof(*local), 0);
         recv(sock, remote, sizeof(*remote), 0);
     } else {
         /* Server */
-        bind(sock, (struct sockaddr*)&addr, sizeof(addr));
-        listen(sock, 1);
+        int opt = 1;
+        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+        addr.sin_addr.s_addr = INADDR_ANY;
+        if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            perror("bind");
+            close(sock);
+            return;
+        }
+        if (listen(sock, 1) < 0) {
+            perror("listen");
+            close(sock);
+            return;
+        }
         int c = accept(sock, NULL, NULL);
+        if (c < 0) {
+            perror("accept");
+            close(sock);
+            return;
+        }
         recv(c, remote, sizeof(*remote), 0);
         send(c, local, sizeof(*local), 0);
         close(c);
@@ -163,39 +220,56 @@ void exchange_connection(struct rdma_ctx *ctx, const char *server_ip,
 int main(int argc, char *argv[])
 {
     int is_server = (argc > 1 && strcmp(argv[1], "server") == 0);
-    const char *peer_ip = is_server ? NULL : argv[2];
-    
+    const char *peer_ip = is_server ? NULL : (argc > 2 ? argv[2] : "127.0.0.1");
+
     struct rdma_ctx ctx = {0};
-    init_ctx(&ctx);
-    
+    if (init_ctx(&ctx) != 0) {
+        fprintf(stderr, "init_ctx failed\n");
+        return 1;
+    }
+
     struct connection_info local_info = {0}, remote_info = {0};
     exchange_connection(&ctx, peer_ip, &local_info, &remote_info);
-    
-    qp_connect(&ctx, remote_info.qp_num, remote_info.lid);
-    
+
+    if (qp_connect(&ctx, remote_info.qp_num, remote_info.lid) != 0) {
+        fprintf(stderr, "QP connect failed\n");
+        return 1;
+    }
+    printf("QP ready (RESET->INIT->RTR->RTS)\n");
+
     if (is_server) {
-        /* Server: 填充数据供Client读取 */
+        /* Server: 填充数据供 Client 读取 */
         printf("Server: filling data...\n");
-        sprintf(ctx.recv_buf, "Hello from server! Time: %ld", time(NULL));
-        
-        printf("Server: data ready at addr=%lu, rkey=%u\n",
+        snprintf(ctx.recv_buf, BUFFER_SIZE, "Hello from server! Time: %ld", (long)time(NULL));
+
+        printf("Server: data ready at addr=%lu, rkey=0x%x\n",
                (unsigned long)local_info.buf_addr, local_info.buf_rkey);
-        printf("Server: waiting...\n");
+        printf("Server: waiting for client to read (10s)...\n");
         sleep(10);
+        printf("Server: done.\n");
     } else {
-        /* Client: 执行RDMA Read */
+        /* Client: 执行 RDMA Read，数据被拉取到本地 recv_buf */
         printf("Client: reading from server...\n");
-        printf("Remote: addr=%lu, rkey=%u\n",
+        printf("Remote: addr=%lu, rkey=0x%x\n",
                (unsigned long)remote_info.buf_addr, remote_info.buf_rkey);
-        
-        sleep(1);  /* 等待Server准备好 */
-        
+
+        sleep(1);  /* 等待 Server 准备好数据 */
+
         if (rdma_read(&ctx, remote_info.buf_addr, remote_info.buf_rkey) == 0) {
-            printf("Client: read data = \"%s\"\n", ctx.send_buf);
+            printf("Client: read data = \"%s\"\n", ctx.recv_buf);
         } else {
             printf("Client: read failed\n");
         }
     }
-    
+
+    /* 清理资源 */
+    if (ctx.mr) ibv_dereg_mr(ctx.mr);
+    if (ctx.send_buf) free(ctx.send_buf);
+    if (ctx.recv_buf) free(ctx.recv_buf);
+    if (ctx.qp) ibv_destroy_qp(ctx.qp);
+    if (ctx.cq) ibv_destroy_cq(ctx.cq);
+    if (ctx.pd) ibv_dealloc_pd(ctx.pd);
+    if (ctx.ctx) ibv_close_device(ctx.ctx);
+
     return 0;
 }

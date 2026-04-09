@@ -93,7 +93,9 @@ int modify_qp_to_init(struct ibv_qp *qp)
                           IBV_ACCESS_REMOTE_READ |
                           IBV_ACCESS_REMOTE_WRITE,
     };
-    return ibv_modify_qp(qp, &attr, IBV_QP_STATE);
+    return ibv_modify_qp(qp, &attr,
+                         IBV_QP_STATE | IBV_QP_PKEY_INDEX |
+                         IBV_QP_PORT | IBV_QP_ACCESS_FLAGS);
 }
 
 int modify_qp_to_rtr(struct ibv_qp *qp, uint32_t remote_qp, uint16_t remote_lid)
@@ -107,7 +109,11 @@ int modify_qp_to_rtr(struct ibv_qp *qp, uint32_t remote_qp, uint16_t remote_lid)
         .min_rnr_timer = 12,
         .ah_attr = {.dlid = remote_lid, .sl = 0, .port_num = 1},
     };
-    return ibv_modify_qp(qp, &attr, IBV_QP_STATE);
+    return ibv_modify_qp(qp, &attr,
+                         IBV_QP_STATE | IBV_QP_PATH_MTU |
+                         IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
+                         IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER |
+                         IBV_QP_AV);
 }
 
 int modify_qp_to_rts(struct ibv_qp *qp)
@@ -120,50 +126,77 @@ int modify_qp_to_rts(struct ibv_qp *qp)
         .rnr_retry = 7,
         .max_rd_atomic = 1,
     };
-    return ibv_modify_qp(qp, &attr, IBV_QP_STATE);
+    return ibv_modify_qp(qp, &attr,
+                         IBV_QP_STATE | IBV_QP_SQ_PSN |
+                         IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
+                         IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC);
 }
 
-/* 交换信息（通过socket） */
-void exchange_info(const char *server_ip, uint32_t *local_qp, uint16_t *local_lid,
+/* 交换信息（通过socket）
+ * server_ip == NULL 表示本端是 server
+ * qp_num 和 lid 直接从 ctx 中传入，避免发送未初始化的零值
+ */
+void exchange_info(const char *server_ip, uint32_t local_qp, uint16_t local_lid,
                    uint32_t *remote_qp, uint16_t *remote_lid)
 {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in addr;
-    
-    *local_qp = 0;
-    *local_lid = 0;
-    
+
+    memset(&addr, 0, sizeof(addr));
+
     if (server_ip) {
         /* Client: connect and exchange */
         addr.sin_family = AF_INET;
         addr.sin_port = htons(9999);
-        inet_pton(AF_INET, server_ip, &addr.sin_addr);
-        
-        connect(sock, (struct sockaddr*)&addr, sizeof(addr));
-        
+        if (inet_pton(AF_INET, server_ip, &addr.sin_addr) <= 0) {
+            fprintf(stderr, "Invalid server IP\n");
+            close(sock);
+            return;
+        }
+        if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            perror("connect");
+            close(sock);
+            return;
+        }
+
         /* Send local info */
-        send(sock, local_qp, sizeof(*local_qp), 0);
-        send(sock, local_lid, sizeof(*local_lid), 0);
-        
+        send(sock, &local_qp, sizeof(local_qp), 0);
+        send(sock, &local_lid, sizeof(local_lid), 0);
+
         /* Recv remote info */
         recv(sock, remote_qp, sizeof(*remote_qp), 0);
         recv(sock, remote_lid, sizeof(*remote_lid), 0);
     } else {
         /* Server: listen and exchange */
+        int opt = 1;
+        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
         addr.sin_family = AF_INET;
         addr.sin_port = htons(9999);
         addr.sin_addr.s_addr = INADDR_ANY;
-        bind(sock, (struct sockaddr*)&addr, sizeof(addr));
-        listen(sock, 1);
-        
+        if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            perror("bind");
+            close(sock);
+            return;
+        }
+        if (listen(sock, 1) < 0) {
+            perror("listen");
+            close(sock);
+            return;
+        }
+
         int client = accept(sock, NULL, NULL);
-        
+        if (client < 0) {
+            perror("accept");
+            close(sock);
+            return;
+        }
+
         recv(client, remote_qp, sizeof(*remote_qp), 0);
         recv(client, remote_lid, sizeof(*remote_lid), 0);
-        
-        send(client, local_qp, sizeof(*local_qp), 0);
-        send(client, local_lid, sizeof(*local_lid), 0);
-        
+
+        send(client, &local_qp, sizeof(local_qp), 0);
+        send(client, &local_lid, sizeof(local_lid), 0);
+
         close(client);
     }
     close(sock);
@@ -237,64 +270,89 @@ int main(int argc, char *argv[])
 {
     struct rdma_context ctx = {0};
     int is_server = (argc > 1 && strcmp(argv[1], "server") == 0);
-    const char *peer_ip = is_server ? NULL : argv[2];
-    
+    const char *peer_ip = is_server ? NULL : (argc > 2 ? argv[2] : "127.0.0.1");
+
     printf("Running as %s\n", is_server ? "server" : "client");
-    
-    init_rdma(&ctx);
-    modify_qp_to_init(ctx.qp);
-    
-    uint32_t local_qp = ctx.qp_num, remote_qp;
-    uint16_t local_lid = ctx.lid, remote_lid;
-    
-    exchange_info(peer_ip, &local_qp, &local_lid, &remote_qp, &remote_lid);
-    
-    modify_qp_to_rtr(ctx.qp, remote_qp, remote_lid);
-    modify_qp_to_rts(ctx.qp);
-    
+
+    if (init_rdma(&ctx) != 0) {
+        fprintf(stderr, "RDMA init failed\n");
+        return 1;
+    }
+    if (modify_qp_to_init(ctx.qp) != 0) {
+        fprintf(stderr, "QP INIT failed\n");
+        return 1;
+    }
+
+    /* 交换连接信息（直接传入已知的 qp_num 和 lid） */
+    uint32_t remote_qp;
+    uint16_t remote_lid;
+    exchange_info(peer_ip, ctx.qp_num, ctx.lid, &remote_qp, &remote_lid);
+    printf("Remote: QP=%u, LID=%u\n", remote_qp, remote_lid);
+
+    if (modify_qp_to_rtr(ctx.qp, remote_qp, remote_lid) != 0) {
+        fprintf(stderr, "QP RTR failed\n");
+        return 1;
+    }
+    if (modify_qp_to_rts(ctx.qp) != 0) {
+        fprintf(stderr, "QP RTS failed\n");
+        return 1;
+    }
+    printf("QP ready (RESET->INIT->RTR->RTS)\n");
+
     if (is_server) {
         printf("Server ready, waiting for messages...\n");
-        
-        /* 预post recv */
-        for (int i = 0; i < 10; i++) {
+
+        /* 预 post recv：为接收 3 条消息各预备一个 recv WR */
+        for (int i = 0; i < 3; i++) {
             recv_message(&ctx);
         }
-        
+
         /* 处理消息 */
         for (int i = 0; i < 3; i++) {
-            int len = recv_message(&ctx);
+            /* 等待 CQ 完成（recv_message 内部已 post recv + poll CQ） */
+            struct ibv_wc wc;
+            while (ibv_poll_cq(ctx.cq, 1, &wc) == 0);
+
+            if (wc.status != IBV_WC_SUCCESS) {
+                fprintf(stderr, "Recv WC error: %s\n", ibv_wc_status_str(wc.status));
+                break;
+            }
+
             struct msg_header *hdr = (struct msg_header*)ctx.buf;
-            printf("Received: type=%u, size=%u, len=%d\n", 
-                   hdr->type, hdr->size, len);
-            
+            printf("Received: type=%u, size=%u, bytes=%u\n",
+                   hdr->type, hdr->size, wc.byte_len);
+
             if (hdr->type == MSG_DONE) break;
-            
-            /* 回复 */
+
+            /* 回复 ACK（先 post recv 用于后续消息，再 send） */
+            recv_message(&ctx);
             char reply[] = "ACK";
-            send_message(&ctx, reply, strlen(reply), MSG_DATA);
+            memcpy(ctx.buf, reply, sizeof(reply));
+            send_message(&ctx, ctx.buf, strlen(reply), MSG_DATA);
         }
     } else {
         printf("Client sending messages...\n");
-        
-        /* 预post recv */
-        for (int i = 0; i < 10; i++) {
-            recv_message(&ctx);
-        }
-        
+
+        /* 预 post recv，准备接收 server 的 ACK */
+        recv_message(&ctx);
+
         /* 发送消息 */
         struct msg_header msg = {.type = MSG_HELLO, .size = 13};
         memcpy(ctx.buf, &msg, sizeof(msg));
         memcpy(ctx.buf + sizeof(msg), "Hello Server!", 13);
         send_message(&ctx, ctx.buf, sizeof(msg) + 13, MSG_DATA);
-        
-        /* 等待ACK */
-        recv_message(&ctx);
-        printf("Got ACK\n");
-        
-        /* 发送完成 */
+
+        /* 等待 ACK（poll CQ） */
+        struct ibv_wc wc;
+        while (ibv_poll_cq(ctx.cq, 1, &wc) == 0);
+        if (wc.status == IBV_WC_SUCCESS) {
+            printf("Got ACK: \"%.*s\"\n", (int)wc.byte_len, ctx.buf);
+        }
+
+        /* 发送完成信号 */
         send_message(&ctx, NULL, 0, MSG_DONE);
     }
-    
+
     printf("Done\n");
     return 0;
 }

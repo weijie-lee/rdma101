@@ -102,10 +102,12 @@ int modify_qp_to_init(struct ibv_qp *qp)
         .port_num = 1,
         .qp_access_flags = IBV_ACCESS_LOCAL_WRITE,
     };
-    return ibv_modify_qp(qp, &attr, IBV_QP_STATE);
+    return ibv_modify_qp(qp, &attr,
+                         IBV_QP_STATE | IBV_QP_PKEY_INDEX |
+                         IBV_QP_PORT | IBV_QP_ACCESS_FLAGS);
 }
 
-int modify_qp_to_rtr(struct ibv_qp *qp)
+int modify_qp_to_rtr(struct ibv_qp *qp, uint16_t local_lid)
 {
     struct ibv_qp_attr attr = {
         .qp_state = IBV_QPS_RTR,
@@ -115,9 +117,13 @@ int modify_qp_to_rtr(struct ibv_qp *qp)
         .max_dest_rd_atomic = 1,
         .min_rnr_timer = 12,
     };
-    attr.ah_attr.dlid = 1;  /* Loopback */
+    attr.ah_attr.dlid = local_lid;  /* 动态查询本机 LID，避免硬编码 */
     attr.ah_attr.port_num = 1;
-    return ibv_modify_qp(qp, &attr, IBV_QP_STATE);
+    return ibv_modify_qp(qp, &attr,
+                         IBV_QP_STATE | IBV_QP_PATH_MTU |
+                         IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
+                         IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER |
+                         IBV_QP_AV);
 }
 
 int modify_qp_to_rts(struct ibv_qp *qp)
@@ -130,7 +136,10 @@ int modify_qp_to_rts(struct ibv_qp *qp)
         .rnr_retry = 7,
         .max_rd_atomic = 1,
     };
-    return ibv_modify_qp(qp, &attr, IBV_QP_STATE);
+    return ibv_modify_qp(qp, &attr,
+                         IBV_QP_STATE | IBV_QP_SQ_PSN |
+                         IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
+                         IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC);
 }
 
 /* 发送数据 */
@@ -210,8 +219,18 @@ int main(int argc, char *argv[])
     
     /* 配置QP状态机 */
     printf("\n配置QP状态机...\n");
+
+    /* 查询本机 LID，用于 RTR 中的 ah_attr.dlid（loopback 时目标就是自己） */
+    struct ibv_port_attr port_attr;
+    if (ibv_query_port(res.context, 1, &port_attr) != 0) {
+        perror("ibv_query_port");
+        return 1;
+    }
+    uint16_t local_lid = port_attr.lid;
+    printf("  本机 LID: %u\n", local_lid);
+
     modify_qp_to_init(res.qp);
-    modify_qp_to_rtr(res.qp);
+    modify_qp_to_rtr(res.qp, local_lid);
     modify_qp_to_rts(res.qp);
     printf("  QP状态: RTS (Ready to Send)\n");
     

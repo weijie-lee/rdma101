@@ -65,7 +65,9 @@ int qp_reset_to_init(struct ibv_qp *qp)
                           IBV_ACCESS_REMOTE_WRITE,
     };
     
-    int ret = ibv_modify_qp(qp, &attr, IBV_QP_STATE);
+    int ret = ibv_modify_qp(qp, &attr,
+                             IBV_QP_STATE | IBV_QP_PKEY_INDEX |
+                             IBV_QP_PORT | IBV_QP_ACCESS_FLAGS);
     if (ret) {
         perror("QP RESET->INIT failed");
     }
@@ -116,7 +118,7 @@ int qp_rtr_to_rts(struct ibv_qp *qp)
     int ret = ibv_modify_qp(qp, &attr,
                              IBV_QP_STATE | IBV_QP_SQ_PSN |
                              IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
-                             IBV_QP_RNR_RETRY | IBV_QP_MAX_RD_ATOMIC);
+                             IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC);
     if (ret) {
         perror("QP RTR->RTS failed");
     }
@@ -183,23 +185,50 @@ int main(int argc, char *argv[])
     
     /* 打印初始QP状态 */
     print_local_qp_info(&dev);
-    
+
     /* 执行状态转换: RESET -> INIT */
     printf("Step 1: RESET -> INIT\n");
     if (qp_reset_to_init(dev.qp)) {
         return 1;
     }
     print_local_qp_info(&dev);
-    
-    /* 注意: INIT -> RTR 需要远端信息，这里演示 RTR -> RTS (需要先到RTR) */
-    /* 实际使用需要先与远端建立连接 */
-    
-    printf("\nNote: INIT->RTR requires remote QP info.\n");
-    printf("Complete state transition sequence:\n");
-    printf("  1. RESET -> INIT (done)\n");
-    printf("  2. INIT -> RTR (need remote QP num + LID)\n");
-    printf("  3. RTR -> RTS (done)\n");
-    
+
+    /*
+     * 演示完整状态转换：INIT -> RTR -> RTS
+     *
+     * 对于 loopback 测试（单机验证），可以用本机 QP num 和 LID
+     * 作为"远端"参数，将 QP 转到 RTR/RTS，完整演示状态机。
+     *
+     * 实际生产中，需要通过 TCP socket 或 RDMA CM 与对端交换：
+     *   - remote_qp_num：对端 QP 编号
+     *   - remote_lid：对端端口 LID
+     */
+
+    /* 查询本机 LID（loopback 演示用） */
+    struct ibv_port_attr port_attr;
+    if (ibv_query_port(dev.context, PORT_NUM, &port_attr) != 0) {
+        perror("query port for loopback");
+        return 1;
+    }
+    uint16_t local_lid = port_attr.lid;
+    uint32_t local_qp_num = dev.qp->qp_num;
+
+    printf("\nStep 2: INIT -> RTR (loopback: remote_qp=%u, remote_lid=%u)\n",
+           local_qp_num, local_lid);
+    if (qp_init_to_rtr(dev.qp, local_qp_num, local_lid)) {
+        return 1;
+    }
+    print_local_qp_info(&dev);
+
+    printf("Step 3: RTR -> RTS\n");
+    if (qp_rtr_to_rts(dev.qp)) {
+        return 1;
+    }
+    print_local_qp_info(&dev);
+
+    printf("\n=== QP state machine complete: RESET -> INIT -> RTR -> RTS ===\n");
+    printf("QP is now ready for data transfer.\n\n");
+
     /* 清理 */
     ibv_destroy_qp(dev.qp);
     ibv_destroy_cq(dev.cq);

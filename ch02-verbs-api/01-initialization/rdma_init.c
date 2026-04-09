@@ -62,6 +62,7 @@ int main(int argc, char *argv[])
     printf("Created CQ with %d entries\n", 128);
 
     /* 5. 创建 Queue Pair */
+    memset(&qp_init_attr, 0, sizeof(qp_init_attr));
     qp_init_attr.send_cq = cq;
     qp_init_attr.recv_cq = cq;
     qp_init_attr.qp_type = IBV_QPT_RC;
@@ -86,7 +87,31 @@ int main(int argc, char *argv[])
                IBV_QPS_RTR, IBV_QPS_RTS);
     }
 
+    /* 6. 注册内存 (Memory Region) - 允许RDMA设备访问该内存 */
+    char *mr_buf = malloc(4096);
+    if (!mr_buf) {
+        perror("Failed to allocate memory for MR");
+        return 1;
+    }
+    memset(mr_buf, 0, 4096);
+
+    struct ibv_mr *mr = ibv_reg_mr(pd, mr_buf, 4096,
+                                   IBV_ACCESS_LOCAL_WRITE |
+                                   IBV_ACCESS_REMOTE_READ |
+                                   IBV_ACCESS_REMOTE_WRITE);
+    if (!mr) {
+        perror("Failed to register MR");
+        free(mr_buf);
+        return 1;
+    }
+    printf("Registered MR: lkey=0x%x, rkey=0x%x, addr=%p, len=%zu\n",
+           mr->lkey, mr->rkey, mr->addr, mr->length);
+
     /* 7. 清理资源 */
+    if (ibv_dereg_mr(mr)) {
+        perror("Failed to deregister MR");
+    }
+    free(mr_buf);
     if (ibv_destroy_qp(qp)) {
         perror("Failed to destroy QP");
     }
