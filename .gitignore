@@ -1,0 +1,53 @@
+# 编译产物 (ELF 二进制)
+ch00-prerequisites/01_struct_pointer
+ch00-prerequisites/02_polling_pattern
+ch02-network-layer/01-infiniband/ib_port_detail
+ch02-network-layer/02-roce/roce_gid_query
+ch02-network-layer/03-iwarp/iwarp_query
+ch02-network-layer/04-verbs-abstraction/verbs_any_transport
+ch03-verbs-api/01-initialization/01_init_resources
+ch03-verbs-api/01-initialization/02_multi_device
+ch03-verbs-api/01-initialization/rdma_init
+ch03-verbs-api/02-qp-state/qp_state
+ch03-verbs-api/02-qp-state/01_qp_error_recovery
+ch03-verbs-api/03-pd/pd_isolation
+ch03-verbs-api/04-mr/mr_access_flags
+ch03-verbs-api/04-mr/mr_multi_reg
+ch03-verbs-api/05-cq/cq_event_driven
+ch03-verbs-api/05-cq/cq_overflow
+ch05-communication/01-rdma-write/rdma_write
+ch05-communication/01-rdma-write/01_write_imm
+ch05-communication/02-send-recv/01_loopback_send_recv
+ch05-communication/02-send-recv/send_recv
+ch05-communication/02-send-recv/02_sge_demo
+ch05-communication/02-send-recv/03_rnr_error_demo
+ch05-communication/03-rdma-read/rdma_read
+ch05-communication/03-rdma-read/01_batch_read
+ch05-communication/04-atomic/atomic_ops
+ch05-communication/04-atomic/01_alignment_error
+ch05-communication/04-atomic/02_spinlock
+ch06-connection/01-manual-connect/manual_connect
+ch06-connection/02-rdma-cm/rdma_cm_example
+ch06-connection/03-ud-mode/ud_loopback
+ch07-engineering/02-tuning/inline_data
+ch07-engineering/02-tuning/unsignaled_send
+ch07-engineering/02-tuning/srq_demo
+ch07-engineering/04-error-handling/trigger_errors
+ch07-engineering/04-error-handling/error_diagnosis
+ch09-quickref/hello_rdma
+ch09-quickref/error_cheatsheet
+
+# 静态库
+common/librdma_utils.a
+common/*.o
+
+# 编辑器和IDE
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

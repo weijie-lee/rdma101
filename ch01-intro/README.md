@@ -332,4 +332,4 @@ RDMA Read:
 
 ## 下一步
 
-进入下一章：[第二章：Verbs API 入门](../ch02-verbs-api/README.md)
+进入下一章：[第二章：网络技术层](../ch02-network-layer/README.md)
