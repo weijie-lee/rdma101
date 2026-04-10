@@ -1,241 +1,241 @@
-# 第一章：RDMA 基础概念
+# Chapter 1: RDMA Fundamentals
 
-## 学习目标
-- 理解传统TCP/IP通信的问题
-- 掌握RDMA的核心优势
-- 了解三种RDMA协议
-- 熟悉RDMA编程的基本术语
+## Learning Objectives
+- Understand the problems of traditional TCP/IP communication
+- Master the core advantages of RDMA
+- Learn about three RDMA protocols
+- Familiarize with basic RDMA programming terminology
 
 ---
 
-## 1.1 传统TCP/IP通信的问题
+## 1.1 Problems of Traditional TCP/IP Communication
 
-### 计算机网络通信基础
+### Computer Network Communication Basics
 
-在了解RDMA之前，我们先回顾传统网络通信的工作方式：
+Before understanding RDMA, let's review how traditional network communication works:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        应用层                                    │
-│                     (你的程序)                                   │
+│                        Application Layer                         │
+│                     (Your Program)                               │
 └─────────────────────────────────────────────────────────────────┘
                               │ write()/send()
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                        传输层 (TCP/UDP)                         │
-│                   内核协议栈处理                                 │
+│                        Transport Layer (TCP/UDP)                 │
+│                   Kernel Protocol Stack Processing               │
 └─────────────────────────────────────────────────────────────────┘
                               │ 
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                        网卡驱动                                 │
-│                   (复制到DMA缓冲区)                             │
+│                        NIC Driver                                │
+│                   (Copy to DMA Buffer)                           │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                          网卡                                    │
-│                   (发送到网络)                                  │
+│                          NIC                                     │
+│                   (Send to Network)                              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 传统通信的数据拷贝
+### Data Copies in Traditional Communication
 
 ```
-用户空间 ──copy──▶ 内核缓冲区 ──copy──▶ 网卡DMA缓冲区 ──发送──▶ 网络
+User Space ──copy──▶ Kernel Buffer ──copy──▶ NIC DMA Buffer ──send──▶ Network
      ◀──copy── ◀──copy── ◀────────────────────────────────────────
-                              接收
+                              receive
 ```
 
-**数据经历了多少次拷贝？**
-- **发送**：用户空间 → 内核空间 (1次)
-- **接收**：内核空间 → 用户空间 (1次)
-- **总计**：至少 **2次** 拷贝
+**How many data copies does the data go through?**
+- **Send**: User Space → Kernel Space (1 copy)
+- **Receive**: Kernel Space → User Space (1 copy)
+- **Total**: At least **2** copies
 
-### 传统通信延迟来源
+### Sources of Traditional Communication Latency
 
-| 操作 | 典型延迟 | 说明 |
+| Operation | Typical Latency | Description |
 |------|----------|------|
-| 系统调用 | 1-2 μs | 从用户态切换到内核态 |
-| 数据拷贝 | 1-2 μs | 内存复制开销 |
-| TCP处理 | 5-10 μs | 协议栈处理 |
-| 中断处理 | 1-5 μs | 硬件中断 |
-| 网络传输 | 100s-1000s μs | 取决于物理距离和带宽 |
+| System Call | 1-2 μs | Context switch from user mode to kernel mode |
+| Data Copy | 1-2 μs | Memory copy overhead |
+| TCP Processing | 5-10 μs | Protocol stack processing |
+| Interrupt Handling | 1-5 μs | Hardware interrupt |
+| Network Transmission | 100s-1000s μs | Depends on physical distance and bandwidth |
 
-### 传统通信的问题总结
+### Summary of Traditional Communication Problems
 
-1. **CPU参与** - 每次通信都需要CPU介入处理
-2. **数据拷贝** - 数据在不同内存区域间多次拷贝
-3. **内核瓶颈** - 所有数据必须经过操作系统内核
-4. **延迟高** - 多次上下文切换增加开销
+1. **CPU Involvement** - Every communication requires CPU intervention
+2. **Data Copies** - Data is copied multiple times between different memory regions
+3. **Kernel Bottleneck** - All data must go through the OS kernel
+4. **High Latency** - Multiple context switches add overhead
 
 ---
 
-## 1.2 RDMA 核心优势
+## 1.2 Core Advantages of RDMA
 
-### 什么是RDMA？
+### What is RDMA?
 
-**Remote Direct Memory Access (RDMA)** - 远程直接内存访问
+**Remote Direct Memory Access (RDMA)** - Direct remote memory access
 
-允许一台计算机直接访问另一台计算机的内存，无需对方CPU和操作系统的参与。
+Allows one computer to directly access another computer's memory without involving the remote CPU or operating system.
 
-### 四大核心优势
+### Four Core Advantages
 
-| 优势 | 说明 |
+| Advantage | Description |
 |------|------|
-| **零拷贝** | 数据直接从一个内存区域传输到另一个，无需CPU参与 |
-| **内核旁路** | 绕过操作系统内核，直接与网卡通信 |
-| **低延迟** | 端到端延迟可低至1-2 μs |
-| **低CPU占用** | 通信不消耗CPU资源 |
+| **Zero Copy** | Data is transferred directly from one memory region to another without CPU involvement |
+| **Kernel Bypass** | Bypasses the OS kernel, communicating directly with the NIC |
+| **Low Latency** | End-to-end latency can be as low as 1-2 μs |
+| **Low CPU Usage** | Communication does not consume CPU resources |
 
-### RDMA vs TCP/IP 延迟对比
+### RDMA vs TCP/IP Latency Comparison
 
 ```
-TCP/IP:  10-100 μs (包含多次拷贝和内核处理)
-RDMA:   1-5 μs   (直接内存访问)
+TCP/IP:  10-100 μs (includes multiple copies and kernel processing)
+RDMA:   1-5 μs   (direct memory access)
 
-性能提升: 10-20倍
+Performance Improvement: 10-20x
 ```
 
-### RDMA 数据传输
+### RDMA Data Transfer
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    传统 TCP/IP 通信                             │
+│                    Traditional TCP/IP Communication              │
 │                                                                 │
-│  发送方                           接收方                         │
+│  Sender                              Receiver                    │
 │  ┌─────┐                        ┌─────┐                        │
 │  │CPU  │ copy                   │CPU  │ copy                  │
 │  └──┬──┘   │                 ◀──└┬──┘   │                     │
 │     │      ▼                        │      ▼                    │
 │  ┌──▼───────────────────────────────▼──┐                        │
-│  │         内核协议栈                    │                        │
+│  │         Kernel Protocol Stack        │                        │
 │  └──────────────────────────────────────┘                        │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
-│                    RDMA 通信                                     │
+│                    RDMA Communication                            │
 │                                                                 │
-│  发送方                           接收方                         │
+│  Sender                              Receiver                    │
 │  ┌─────┐                        ┌─────┐                        │
-│  │CPU  │ ──RDMA Write────────▶│内存 │                        │
-│  └─────┘   (无CPU参与)          └─────┘                        │
+│  │CPU  │ ──RDMA Write────────▶│Memory│                        │
+│  └─────┘   (No CPU involved)    └─────┘                        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 1.3 三种RDMA协议
+## 1.3 Three RDMA Protocols
 
 ### 1. InfiniBand (IB)
 
-- **特点**：原生RDMA协议，专为高速网络设计
-- **带宽**：HDR 400Gbps, NDR 800Gbps
-- **需要**：专用IB交换机
-- **优点**：性能最高
-- **缺点**：需要专用硬件
+- **Features**: Native RDMA protocol, designed for high-speed networking
+- **Bandwidth**: HDR 400Gbps, NDR 800Gbps
+- **Requires**: Dedicated IB switches
+- **Pros**: Highest performance
+- **Cons**: Requires dedicated hardware
 
 ### 2. RoCE (RDMA over Converged Ethernet)
 
-在以太网上运行RDMA，是目前最流行的方案。
+Runs RDMA over Ethernet, currently the most popular solution.
 
-**版本**：
-| 版本 | 说明 |
+**Versions**:
+| Version | Description |
 |------|------|
-| RoCE v1 | 需要无损网络 (Data Center Bridging) |
-| RoCE v2 | 支持路由，基于UDP (端口号4791) |
+| RoCE v1 | Requires lossless network (Data Center Bridging) |
+| RoCE v2 | Supports routing, based on UDP (port 4791) |
 
-**优势**：
-- 兼容现有以太网设备
-- 可使用标准以太网交换机
-- 支持跨路由
+**Advantages**:
+- Compatible with existing Ethernet equipment
+- Can use standard Ethernet switches
+- Supports cross-router communication
 
 ### 3. iWARP (Internet Wide Area RDMA Protocol)
 
-- **特点**：基于TCP/IP的RDMA
-- **优势**：可穿越防火墙、NAT
-- **性能**：比IB和RoCE稍差
-- **使用场景**：广域网
+- **Features**: TCP/IP-based RDMA
+- **Advantages**: Can traverse firewalls and NAT
+- **Performance**: Slightly lower than IB and RoCE
+- **Use Case**: Wide area networks
 
-### 协议对比
+### Protocol Comparison
 
-| 特性 | InfiniBand | RoCE v2 | iWARP |
+| Feature | InfiniBand | RoCE v2 | iWARP |
 |------|------------|---------|-------|
-| 性能 | 最高 | 高 | 中 |
-| 兼容性 | 专用硬件 | 以太网 | TCP/IP |
-| 路由支持 | 是 | 是 | 是 |
-| 穿越防火墙 | 否 | 否 | 是 |
-| 典型带宽 | 400/800 Gbps | 100/200 Gbps | 40/100 Gbps |
+| Performance | Highest | High | Medium |
+| Compatibility | Dedicated Hardware | Ethernet | TCP/IP |
+| Routing Support | Yes | Yes | Yes |
+| Firewall Traversal | No | No | Yes |
+| Typical Bandwidth | 400/800 Gbps | 100/200 Gbps | 40/100 Gbps |
 
-### 选择建议
+### Recommendation Guide
 
-| 场景 | 推荐协议 |
+| Scenario | Recommended Protocol |
 |------|----------|
-| 高性能计算 (HPC) | InfiniBand |
-| 数据中心 | RoCE v2 |
-| 需要跨广域网 | iWARP |
+| High Performance Computing (HPC) | InfiniBand |
+| Data Center | RoCE v2 |
+| Cross WAN Required | iWARP |
 
 ---
 
-## 1.4 RDMA 核心术语
+## 1.4 RDMA Core Terminology
 
-### Queue Pair (QP) - 队列对
+### Queue Pair (QP)
 
-RDMA通信的基本单元，由两部分组成：
-- **SQ (Send Queue)** - 发送队列
-- **RQ (Receive Queue)** - 接收队列
+The basic unit of RDMA communication, consisting of two parts:
+- **SQ (Send Queue)** - Send Queue
+- **RQ (Receive Queue)** - Receive Queue
 
 ```
 ┌─────────────────────────────────────┐
 │            Queue Pair                │
 │  ┌───────────┐   ┌───────────┐      │
 │  │    SQ     │   │    RQ     │      │
-│  │(发送队列) │   │(接收队列) │      │
+│  │(Send Queue)│   │(Recv Queue)│      │
 │  └───────────┘   └───────────┘      │
 └─────────────────────────────────────┘
 ```
 
-### Memory Region (MR) - 内存区域
+### Memory Region (MR)
 
-- 注册到RDMA设备的虚拟内存区域
-- 包含：**虚拟地址**、**物理地址**、**访问权限**
+- Virtual memory region registered with the RDMA device
+- Contains: **Virtual Address**, **Physical Address**, **Access Permissions**
 
 ```
-用户虚拟地址 ──注册──▶ RDMA设备 ──转换──▶ 物理地址
+User Virtual Address ──register──▶ RDMA Device ──translate──▶ Physical Address
 ```
 
-### Protection Domain (PD) - 保护域
+### Protection Domain (PD)
 
-- 用于隔离不同应用的资源
-- QP和MR必须属于同一个PD
+- Used to isolate resources of different applications
+- QP and MR must belong to the same PD
 
-### Completion Queue (CQ) - 完成队列
+### Completion Queue (CQ)
 
-- 存储通信操作完成通知
-- 包含操作状态、错误信息
+- Stores communication operation completion notifications
+- Contains operation status, error information
 
-### Work Request (WR) - 工作请求
+### Work Request (WR)
 
-- 提交到队列的操作请求
-- 描述要执行的操作及参数
+- Operation request submitted to a queue
+- Describes the operation to perform and its parameters
 
-### Work Completion (WC) - 工作完成
+### Work Completion (WC)
 
-- 操作完成后的状态返回
-- 包含：状态、操作类型、ImmData等
+- Status returned after an operation completes
+- Contains: status, operation type, ImmData, etc.
 
 ---
 
-## 1.5 RDMA 操作类型
+## 1.5 RDMA Operation Types
 
-| 操作 | 说明 | 需要对方配合 | 典型用途 |
+| Operation | Description | Requires Remote Cooperation | Typical Use |
 |------|------|--------------|----------|
-| **Send/Recv** | 传统消息传递 | 是 | 消息通知 |
-| **RDMA Write** | 直接写远程内存 | 否 | 数据推送 |
-| **RDMA Read** | 直接读远程内存 | 否 | 数据拉取 |
-| **Atomic** | 原子操作(CAS/FAA) | 否 | 计数器、锁 |
+| **Send/Recv** | Traditional message passing | Yes | Message notification |
+| **RDMA Write** | Write directly to remote memory | No | Data push |
+| **RDMA Read** | Read directly from remote memory | No | Data pull |
+| **Atomic** | Atomic operations (CAS/FAA) | No | Counters, locks |
 
-### 操作时序图
+### Operation Timing Diagram
 
 ```
 Send/Recv:
@@ -249,24 +249,24 @@ Send/Recv:
 
 RDMA Write:
   A                          B
-  │───RDMA Write───────────▶│ (直接写B的内存)
+  │───RDMA Write───────────▶│ (Directly writes to B's memory)
   │◀──────completion─────────│
 
 RDMA Read:
   A                          B
   │───RDMA Read─────────────▶│
-  │◀─completion (数据在A)────│ (B无感知)
+  │◀─completion (data at A)──│ (B is unaware)
 ```
 
 ---
 
-## 1.6 编程框架
+## 1.6 Programming Framework
 
 ### libibverbs (Verbs API)
 
-- RDMA编程的底层API
-- 硬件厂商通用接口
-- Linux原生支持
+- Low-level API for RDMA programming
+- Vendor-agnostic interface
+- Native Linux support
 
 ```c
 #include <infiniband/verbs.h>
@@ -274,34 +274,34 @@ RDMA Read:
 
 ### RDMA CM
 
-- 基于连接的通信管理API
-- 建立在libibverbs之上
-- 提供更易用的接口
+- Connection-based communication management API
+- Built on top of libibverbs
+- Provides an easier-to-use interface
 
 ```c
 #include <rdma/rdma_cma.h>
 ```
 
-### 对比
+### Comparison
 
-| 特性 | Verbs API | RDMA CM |
+| Feature | Verbs API | RDMA CM |
 |------|------------|---------|
-| 复杂度 | 高 | 低 |
-| 控制力 | 完整 | 有限 |
-| 适用场景 | 高性能 | 简化开发 |
+| Complexity | High | Low |
+| Control | Full | Limited |
+| Use Case | High Performance | Simplified Development |
 
 ---
 
-## 1.7 硬件组成
+## 1.7 Hardware Components
 
-### RDMA网卡
+### RDMA NICs
 
-常见的RDMA网卡：
-- **Mellanox (NVIDIA)** - ConnectX 系列
-- **Intel** - Omni-Path 系列
-- **Broadcom** - NetXtreme 系列
+Common RDMA NICs:
+- **Mellanox (NVIDIA)** - ConnectX Series
+- **Intel** - Omni-Path Series
+- **Broadcom** - NetXtreme Series
 
-### 网络拓扑
+### Network Topology
 
 ```
 ┌──────────┐         ┌──────────┐
@@ -319,17 +319,17 @@ RDMA Read:
 
 ---
 
-## 练习题
+## Exercises
 
-1. 传统TCP/IP通信中，数据需要经历哪几次拷贝？
-2. CPU在传统网络通信中承担哪些工作？
-3. RDMA相比TCP/IP的核心优势是什么？
-4. 三种RDMA协议有什么区别？各适合什么场景？
-5. QP由哪两部分组成？
-6. 为什么RDMA Write不需要对方配合？
+1. In traditional TCP/IP communication, how many data copies does the data go through?
+2. What roles does the CPU play in traditional network communication?
+3. What are the core advantages of RDMA compared to TCP/IP?
+4. What are the differences between the three RDMA protocols? What scenarios are they suited for?
+5. What two parts make up a QP?
+6. Why does RDMA Write not require remote cooperation?
 
 ---
 
-## 下一步
+## Next Step
 
-进入下一章：[第二章：网络技术层](../ch02-network-layer/README.md)
+Proceed to the next chapter: [Chapter 2: Network Technology Layer](../ch02-network-layer/README.md)

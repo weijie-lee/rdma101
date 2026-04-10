@@ -1,36 +1,36 @@
-# 第四章：QP与MR深入
+# Chapter 4: Deep Dive into QP and MR
 
-## 学习目标
+## Learning Objectives
 
-| 目标 | 说明 |
-|------|------|
-| 深入理解Queue Pair | 掌握QP类型、SGE、WR结构 |
-| 掌握Memory Region | 理解虚拟地址到物理地址的转换 |
-| 理解RDMA操作 | 掌握RDMA Write/Read的原理 |
-| 理解CQ工作方式 | 掌握轮询和事件两种模式 |
+| Objective | Description |
+|-----------|-------------|
+| Deep understanding of Queue Pair | Master QP types, SGE, WR structures |
+| Master Memory Region | Understand virtual-to-physical address translation |
+| Understand RDMA operations | Master the principles of RDMA Write/Read |
+| Understand CQ working modes | Master both polling and event-driven modes |
 
 ---
 
-## 3.1 Queue Pair 详解
+## 3.1 Queue Pair In-Depth
 
-### QP类型
+### QP Types
 
-| 类型 | 名称 | 特点 | 适用场景 |
-|------|------|------|----------|
-| **RC** | Reliable Connection | 保证顺序和交付 | 推荐使用 |
-| **UC** | Unreliable Connection | 仅顺序交付，无重传 | 特定场景 |
-| **UD** | Unreliable Datagram | 无连接，类似UDP | 多播、广播 |
+| Type | Name | Characteristics | Use Cases |
+|------|------|----------------|-----------|
+| **RC** | Reliable Connection | Guarantees order and delivery | Recommended |
+| **UC** | Unreliable Connection | Order delivery only, no retransmission | Specific scenarios |
+| **UD** | Unreliable Datagram | Connectionless, similar to UDP | Multicast, broadcast |
 
-**推荐使用 RC (Reliable Connection)**，最常用且功能完整。
+**RC (Reliable Connection) is recommended**, the most commonly used with complete functionality.
 
-### QP编号
+### QP Number
 
-- 每个QP有一个唯一的数字标识
-- 范围：0 ~ 2^24-1
-- 本地QP号在创建时分配
-- 远端QP号需要通过连接过程交换
+- Each QP has a unique numeric identifier
+- Range: 0 ~ 2^24-1
+- Local QP number is assigned at creation time
+- Remote QP number needs to be exchanged through the connection process
 
-### QP与CQ的关系
+### Relationship between QP and CQ
 
 ```
 ┌─────────────────────────────────────────┐
@@ -54,39 +54,39 @@
 
 ## 3.2 Scatter/Gather Entry (SGE)
 
-### 什么是SGE？
+### What is SGE?
 
-SGE允许**一次RDMA操作传输多个不连续的内存块**：
+SGE allows **transferring multiple non-contiguous memory blocks in a single RDMA operation**:
 
 ```
-传统模式:
+Traditional mode:
 [████████████]
 
-SGE模式:
+SGE mode:
 [██] + [██████] + [██]
 ```
 
-### SGE结构
+### SGE Structure
 
 ```c
 struct ibv_sge {
-    uint64_t addr;      // 内存地址
-    uint32_t length;   // 长度
-    uint32_t lkey;     // 本地MR的lkey
+    uint64_t addr;      // Memory address
+    uint32_t length;   // Length
+    uint32_t lkey;     // lkey of the local MR
 };
 ```
 
-### 使用示例
+### Usage Example
 
 ```c
-// 单元素SGE
+// Single-element SGE
 struct ibv_sge sge = {
     .addr = (uint64_t)buffer,
     .length = BUFFER_SIZE,
     .lkey = mr->lkey,
 };
 
-// 多元素SGE (用于非连续内存)
+// Multi-element SGE (for non-contiguous memory)
 struct ibv_sge sge[2] = {
     {.addr = (uint64_t)buf1, .length = 100, .lkey = mr->lkey},
     {.addr = (uint64_t)buf2, .length = 200, .lkey = mr->lkey},
@@ -94,60 +94,60 @@ struct ibv_sge sge[2] = {
 
 struct ibv_send_wr wr = {
     .sg_list = sge,
-    .num_sge = 2,  // 使用2个SGE
+    .num_sge = 2,  // Using 2 SGEs
     ...
 };
 ```
 
 ---
 
-## 3.3 Memory Region 深入
+## 3.3 Memory Region In-Depth
 
-### 虚拟地址 vs 物理地址
+### Virtual Address vs Physical Address
 
 ```
-用户程序          内核              RDMA网卡
+User Program          Kernel              RDMA NIC
    │               │                   │
-   │ 虚拟地址      │                   │
+   │ Virtual addr  │                   │
    ├──────────────▶│                   │
-   │               │ 物理地址          │
+   │               │ Physical addr     │
    │               ├─────────────────▶│
    │               │                   │ DMA
-   │               │                   ├──────────▶ 网络
+   │               │                   ├──────────▶ Network
 ```
 
-- 操作系统使用**虚拟地址**
-- RDMA网卡使用**物理地址**进行DMA
-- **MR注册过程**将虚拟地址转换为物理地址
+- The operating system uses **virtual addresses**
+- The RDMA NIC uses **physical addresses** for DMA
+- **The MR registration process** translates virtual addresses to physical addresses
 
-### Key (密钥)
+### Keys
 
-| Key | 说明 | 用途 |
-|-----|------|------|
-| **lkey** | 本地密钥 | 本地操作（发送、接收） |
-| **rkey** | 远程密钥 | 远端操作（RDMA Write/Read） |
+| Key | Description | Usage |
+|-----|-------------|-------|
+| **lkey** | Local key | Local operations (send, receive) |
+| **rkey** | Remote key | Remote operations (RDMA Write/Read) |
 
 ```c
-// 本地操作使用lkey
+// Local operations use lkey
 sge.lkey = mr->lkey;
 
-// 远端操作需要知道对方的rkey
+// Remote operations need the peer's rkey
 wr.rdma.rkey = remote_mr->rkey;
 ```
 
-### 预注册内存池
+### Pre-registered Memory Pool
 
-频繁注册/注销内存有较大开销，建议预注册：
+Frequent registration/deregistration of memory has significant overhead; pre-registration is recommended:
 
 ```c
 #define POOL_SIZE (16 * 1024 * 1024)  // 16MB
 char *memory_pool = malloc(POOL_SIZE);
 
-// 一次性注册
+// Register once
 struct ibv_mr *pool_mr = ibv_reg_mr(pd, memory_pool, POOL_SIZE,
                                         IBV_ACCESS_REMOTE_WRITE);
 
-// 重复使用这块内存的不同区域
+// Reuse different regions of this memory
 void *alloc_buf(size_t size) {
     static size_t offset = 0;
     void *ptr = memory_pool + offset;
@@ -158,26 +158,26 @@ void *alloc_buf(size_t size) {
 
 ---
 
-## 3.4 RDMA Write 操作
+## 3.4 RDMA Write Operation
 
-### 原理
+### Principle
 
-直接写入远程主机的内存，**无需远程CPU参与**。
+Directly writes to the remote host's memory, **without remote CPU involvement**.
 
 ```
-本地                              远程
+Local                              Remote
 ┌─────────┐                      ┌─────────┐
 │ Send Q  │───RDMA Write────────▶│ Memory  │
 └─────────┘                      └─────────┘
     │                                ▲
-    │    WC (完成通知)               │
+    │    WC (completion notification)│
     └────────────────────────────────┘
 ```
 
-### 代码示例
+### Code Example
 
 ```c
-// 发送端
+// Sender
 struct ibv_sge sge = {
     .addr = (uint64_t)local_buffer,
     .length = data_size,
@@ -187,8 +187,8 @@ struct ibv_sge sge = {
 struct ibv_send_wr wr = {
     .opcode = IBV_WR_RDMA_WRITE,
     .wr.rdma = {
-        .remote_addr = remote_buffer_addr,  // 远程地址
-        .rkey = remote_buffer_rkey,         // 远程密钥
+        .remote_addr = remote_buffer_addr,  // Remote address
+        .rkey = remote_buffer_rkey,         // Remote key
     },
     .sg_list = &sge,
     .num_sge = 1,
@@ -197,43 +197,43 @@ struct ibv_send_wr wr = {
 
 ibv_post_send(qp, &wr, &bad_wr);
 
-// 等待完成
+// Wait for completion
 poll_cq(cq, &wc);
 ```
 
-### 特点
+### Characteristics
 
-| 特性 | 说明 |
-|------|------|
-| 对方配合 | 不需要对方CPU参与 |
-| 发送方控制 | 发送方决定何时写入 |
-| 推送模式 | 适合主动推送数据到远程 |
-| 性能 | 延迟最低 |
+| Feature | Description |
+|---------|-------------|
+| Peer cooperation | No remote CPU involvement needed |
+| Sender control | Sender decides when to write |
+| Push mode | Suitable for actively pushing data to remote |
+| Performance | Lowest latency |
 
 ---
 
-## 3.5 RDMA Read 操作
+## 3.5 RDMA Read Operation
 
-### 原理
+### Principle
 
-直接读取远程主机的内存，**数据拉取到本地**：
+Directly reads the remote host's memory, **data is pulled to local**:
 
 ```
-本地                              远程
+Local                              Remote
 ┌─────────┐                      ┌─────────┐
 │ Send Q  │◀───RDMA Read────────│ Memory  │
 └─────────┘                      └─────────┘
     │                                │
-    │    WC + 数据到本地             │
+    │    WC + data arrives locally   │
     └────────────────────────────────┘
 ```
 
-### 代码示例
+### Code Example
 
 ```c
-// 读取端
+// Reader
 struct ibv_sge sge = {
-    .addr = (uint64_t)local_buffer,   // 数据将放在这里
+    .addr = (uint64_t)local_buffer,   // Data will be placed here
     .length = data_size,
     .lkey = local_mr->lkey,
 };
@@ -241,8 +241,8 @@ struct ibv_sge sge = {
 struct ibv_send_wr wr = {
     .opcode = IBV_WR_RDMA_READ,
     .wr.rdma = {
-        .remote_addr = remote_buffer_addr,  // 远程地址
-        .rkey = remote_buffer_rkey,         // 远程密钥
+        .remote_addr = remote_buffer_addr,  // Remote address
+        .rkey = remote_buffer_rkey,         // Remote key
     },
     .sg_list = &sge,
     .num_sge = 1,
@@ -251,28 +251,28 @@ struct ibv_send_wr wr = {
 
 ibv_post_send(qp, &wr, &bad_wr);
 
-// 等待完成，然后local_buffer包含远程数据
+// Wait for completion, then local_buffer contains the remote data
 poll_cq(cq, &wc);
 ```
 
-### 特点
+### Characteristics
 
-| 特性 | 说明 |
-|------|------|
-| 对方配合 | 远程主机无感知 |
-| 拉取模式 | 适合主动拉取远程数据 |
-| 数据位置 | 完成后数据在本地内存 |
+| Feature | Description |
+|---------|-------------|
+| Peer cooperation | Remote host is unaware |
+| Pull mode | Suitable for actively pulling remote data |
+| Data location | Data is in local memory after completion |
 
 ---
 
-## 3.6 Send/Recv 操作
+## 3.6 Send/Recv Operation
 
-### 原理
+### Principle
 
-传统的消息传递模式，**需要双方配合**：
+Traditional message passing mode, **requires cooperation from both sides**:
 
 ```
-发送方                           接收方
+Sender                           Receiver
   │                                │
   │───post_send()────────────────▶│
   │                                │
@@ -283,20 +283,20 @@ poll_cq(cq, &wc);
   │◀──────WC────────────────────────│
 ```
 
-### 对比表
+### Comparison Table
 
-| 特性 | Send/Recv | RDMA Write |
-|------|-----------|------------|
-| 对方配合 | 需要 | 不需要 |
-| 控制权 | 接收方 | 发送方 |
-| 即时数据 | 支持(ImmData) | 不支持 |
-| 典型用途 | 消息通知 | 数据传输 |
+| Feature | Send/Recv | RDMA Write |
+|---------|-----------|------------|
+| Peer cooperation | Required | Not required |
+| Control | Receiver | Sender |
+| Immediate data | Supported (ImmData) | Not supported |
+| Typical usage | Message notification | Data transfer |
 
 ---
 
-## 3.7 完成队列 (CQ) 深入
+## 3.7 Completion Queue (CQ) In-Depth
 
-### Polling模式
+### Polling Mode
 
 ```c
 while (1) {
@@ -329,28 +329,28 @@ while (1) {
 }
 ```
 
-### 事件模式
+### Event Mode
 
 ```c
-// 创建带事件的CQ
+// Create CQ with event channel
 struct ibv_comp_channel *channel;
 channel = ibv_create_comp_channel(context);
 cq = ibv_create_cq(context, cq_size, NULL, channel, 0);
 
-// 等待事件
+// Wait for event
 struct ibv_cq *ev_cq;
 void *ev_ctx;
 ibv_get_cq_event(channel, &ev_cq, &ev_ctx);
 
-// 处理完成
+// Process completion
 ibv_ack_cq_event(ev_cq, 1);
 ```
 
 ---
 
-## 3.8 运行验证
+## 3.8 Running Verification
 
-### 编译
+### Compilation
 ```bash
 cd ch04-communication/01-rdma-write
 make
@@ -359,26 +359,26 @@ cd ../03-rdma-read
 make
 ```
 
-### 测试RDMA Read
+### Testing RDMA Read
 
 ```bash
-# 机器A (Server)
+# Machine A (Server)
 ./rdma_read server
 
-# 机器B (Client)
+# Machine B (Client)
 ./rdma_read client <A_ip>
 ```
 
-### 预期输出
+### Expected Output
 
-**Server端:**
+**Server side:**
 ```
 Server: filling data...
 Server: data ready at addr=..., rkey=...
 Server: waiting...
 ```
 
-**Client端:**
+**Client side:**
 ```
 Client: reading from server...
 Remote: addr=..., rkey=...
@@ -387,15 +387,15 @@ Client: read data = "Hello from server! Time: ..."
 
 ---
 
-## 练习题
+## Exercises
 
-1. **概念题**: RC和UD QP的区别是什么？
-2. **编程题**: 修改RDMA Read示例，实现双向数据交换
-3. **分析题**: 为什么RDMA Write延迟比Send/Recv低？
-4. **实践题**: 使用多SGE实现非连续内存传输
+1. **Conceptual**: What is the difference between RC and UD QP?
+2. **Programming**: Modify the RDMA Read example to implement bidirectional data exchange
+3. **Analysis**: Why does RDMA Write have lower latency than Send/Recv?
+4. **Hands-on**: Use multiple SGEs to implement non-contiguous memory transfer
 
 ---
 
-## 下一步
+## Next Step
 
-进入下一章：[第五章：通信模式实践](../ch05-communication/README.md)
+Proceed to the next chapter: [Chapter 5: Communication Patterns in Practice](../ch05-communication/README.md)

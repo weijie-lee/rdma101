@@ -1,153 +1,153 @@
-# 第四章：RDMA 通信模式实践
+# Chapter 4: RDMA Communication Patterns in Practice
 
-## 学习目标
+## Learning Objectives
 
-| 目标 | 说明 |
-|------|------|
-| 掌握四种通信模式 | Send/Recv、Write、Read、Atomic |
-| 理解各模式适用场景 | 根据需求选择合适的模式 |
-| 能够编写完整C/S程序 | 通过Socket交换连接信息 |
-| 理解即时数据使用 | 掌握ImmData的使用 |
-| 掌握RDMA CM编程 | 理解高级连接管理API |
-| 理解多线程RDMA | 掌握线程安全编程要点 |
-| 掌握性能优化技巧 | 学会提升RDMA性能 |
+| Objective | Description |
+|-----------|-------------|
+| Master four communication patterns | Send/Recv, Write, Read, Atomic |
+| Understand applicable scenarios for each pattern | Choose the appropriate pattern based on requirements |
+| Be able to write complete C/S programs | Exchange connection info via Socket |
+| Understand immediate data usage | Master the use of ImmData |
+| Master RDMA CM programming | Understand the advanced connection management API |
+| Understand multi-threaded RDMA | Master thread-safe programming essentials |
+| Master performance optimization techniques | Learn to improve RDMA performance |
 
 ---
 
-## 4.1 四种通信模式对比
+## 4.1 Comparison of Four Communication Patterns
 
-| 模式 | 对方配合 | 典型用途 | 性能 | 复杂度 |
-|------|----------|----------|------|--------|
-| **Send/Recv** | 需要 | 消息传递 | 高 | 低 |
-| **RDMA Write** | 不需要 | 数据推送 | 最高 | 中 |
-| **RDMA Read** | 不需要 | 数据拉取 | 高 | 中 |
-| **Atomic** | 不需要 | 计数器、锁 | 中 | 高 |
+| Pattern | Peer Cooperation | Typical Usage | Performance | Complexity |
+|---------|-----------------|---------------|-------------|------------|
+| **Send/Recv** | Required | Message passing | High | Low |
+| **RDMA Write** | Not required | Data push | Highest | Medium |
+| **RDMA Read** | Not required | Data pull | High | Medium |
+| **Atomic** | Not required | Counters, locks | Medium | High |
 
-### 选择指南
+### Selection Guide
 
 ```
-需要对方知道数据来了？
+Does the peer need to know data has arrived?
      │
      ├─ Yes → Send/Recv
      │
-     └─ No → 主动推送还是被动拉取？
+     └─ No → Active push or passive pull?
               │
-              ├─ 推送 → RDMA Write
-              └─ 拉取 → RDMA Read
+              ├─ Push → RDMA Write
+              └─ Pull → RDMA Read
 
-需要原子操作？
+Need atomic operations?
      │
      └─ Yes → Atomic (CAS/FAA)
 ```
 
 ---
 
-## 4.2 Send/Recv 模式
+## 4.2 Send/Recv Pattern
 
-### 适用场景
+### Applicable Scenarios
 
-- 消息驱动架构
-- 不知道数据何时到达
-- 需要即时数据(ImmData)
-- 简单的请求/响应
+- Message-driven architecture
+- Unknown data arrival time
+- Need immediate data (ImmData)
+- Simple request/response
 
-### 示例代码
+### Example Code
 
-- [02-send-recv/send_recv.c](./02-send-recv/send_recv.c) - 跨机器通信
-- [02-send-recv/01_loopback_send_recv.c](./02-send-recv/01_loopback_send_recv.c) - 本地Loopback
+- [02-send-recv/send_recv.c](./02-send-recv/send_recv.c) - Cross-machine communication
+- [02-send-recv/01_loopback_send_recv.c](./02-send-recv/01_loopback_send_recv.c) - Local Loopback
 
-### 编译运行
+### Build and Run
 
 ```bash
 cd 02-send-recv
 make
 
-# 终端1 - Server
+# Terminal 1 - Server
 ./send_recv server
 
-# 终端2 - Client
+# Terminal 2 - Client
 ./send_recv client 192.168.1.100
 ```
 
 ---
 
-## 4.3 RDMA Write 模式
+## 4.3 RDMA Write Pattern
 
-### 适用场景
+### Applicable Scenarios
 
-- 高性能数据传输
-- 主动推送数据到远程
-- 流式数据传输
-- 无需对方感知的数据同步
+- High-performance data transfer
+- Actively pushing data to remote
+- Streaming data transfer
+- Data synchronization without peer awareness
 
-### 特点
+### Characteristics
 
-| 特性 | 说明 |
-|------|------|
-| 零CPU参与 | 远程主机无感知 |
-| 发送方控制 | 何时写入由发送方决定 |
-| 推送模式 | 主动将数据推给接收方 |
-| 延迟最低 | 比Send/Recv更快 |
+| Feature | Description |
+|---------|-------------|
+| Zero CPU involvement | Remote host is unaware |
+| Sender control | When to write is decided by the sender |
+| Push mode | Actively pushes data to the receiver |
+| Lowest latency | Faster than Send/Recv |
 
-### 示例代码
+### Example Code
 
 [01-rdma-write/rdma_write.c](./01-rdma-write/rdma_write.c)
 
 ---
 
-## 4.4 RDMA Read 模式
+## 4.4 RDMA Read Pattern
 
-### 适用场景
+### Applicable Scenarios
 
-- 远程数据处理
-- 分布式计算中的数据拉取
-- 请求/响应模式
-- 读取远程配置或状态
+- Remote data processing
+- Data pulling in distributed computing
+- Request/response pattern
+- Reading remote configuration or state
 
-### 示例代码
+### Example Code
 
 [03-rdma-read/rdma_read.c](./03-rdma-read/rdma_read.c)
 
 ---
 
-## 4.5 Atomics 原子操作
+## 4.5 Atomic Operations
 
-### 支持的操作
+### Supported Operations
 
-| 操作 | 说明 | 用途 |
-|------|------|------|
-| **Fetch & Add (FAA)** | 读取值，递增，写回 | 计数器、序列号生成 |
-| **Compare & Swap (CAS)** | 比较相等则交换 | 分布式锁、乐观锁 |
+| Operation | Description | Usage |
+|-----------|-------------|-------|
+| **Fetch & Add (FAA)** | Read value, increment, write back | Counters, sequence number generation |
+| **Compare & Swap (CAS)** | Swap if equal | Distributed locks, optimistic locking |
 
-### 示例代码
+### Example Code
 
 [04-atomic/atomic_ops.c](./04-atomic/atomic_ops.c)
 
 ---
 
-## 4.6 即时数据 (ImmData)
+## 4.6 Immediate Data (ImmData)
 
-- 32位即时数据，随WR一起发送
-- 无需额外内存操作
+- 32-bit immediate data, sent along with the WR
+- No additional memory operations needed
 
 ---
 
-## 4.7 连接建立方式
+## 4.7 Connection Establishment Methods
 
-### 方式一：ibverbs (手动)
+### Method 1: ibverbs (Manual)
 
-通过Socket交换QP信息后配置QP属性。
+Configure QP attributes after exchanging QP info through Socket.
 
-### 方式二：RDMA CM (高级API)
+### Method 2: RDMA CM (Advanced API)
 
 ```c
-// 服务器
+// Server
 rdma_create_id(ec, &listen_id, NULL, RDMA_PS_TCP);
 rdma_bind_addr(listen_id, &addr);
 rdma_listen(listen_id, 1);
 rdma_accept(event->id, NULL);
 
-// 客户端
+// Client
 rdma_create_id(ec, &id, NULL, RDMA_PS_TCP);
 rdma_resolve_addr(id, NULL, &server_addr, 1000);
 rdma_connect(id, &conn_param);
@@ -155,54 +155,54 @@ rdma_connect(id, &conn_param);
 
 ---
 
-## 4.8 多线程RDMA编程
+## 4.8 Multi-threaded RDMA Programming
 
-### 线程模型
+### Threading Models
 
-| 模型 | 特点 |
-|------|------|
-| 单QP多线程 | 需要加锁，竞争激烈 |
-| 每线程独立QP | 无锁，性能好（推荐） |
+| Model | Characteristics |
+|-------|----------------|
+| Single QP multi-threaded | Requires locking, high contention |
+| Independent QP per thread | Lock-free, good performance (recommended) |
 
-### 资源管理策略
+### Resource Management Strategy
 
-| 资源 | 策略 |
-|------|------|
-| QP | 每线程独立 |
-| CQ | 每线程独立 |
-| PD | 共享 |
-| MR | 预注册，按需分片 |
+| Resource | Strategy |
+|----------|----------|
+| QP | Independent per thread |
+| CQ | Independent per thread |
+| PD | Shared |
+| MR | Pre-registered, partitioned on demand |
 
 ---
 
-## 4.9 性能优化技巧
+## 4.9 Performance Optimization Tips
 
-### 1. 内存优化
+### 1. Memory Optimization
 
 ```c
-// 预注册内存池
+// Pre-registered memory pool
 #define POOL_SIZE (16 * 1024 * 1024)
 void *pool = aligned_alloc(4096, POOL_SIZE);
 struct ibv_mr *mr = ibv_reg_mr(pd, pool, POOL_SIZE, 
     IBV_ACCESS_REMOTE_WRITE);
 ```
 
-### 2. 批处理
+### 2. Batching
 
 ```c
-// 链接多个WR
+// Chain multiple WRs
 wr1.next = &wr2;
 ibv_post_send(qp, &wr1, &bad_wr);
 ```
 
-### 3. 异步操作
+### 3. Asynchronous Operations
 
 ```c
-// 批量提交
+// Batch submission
 for (int i = 0; i < batch_size; i++) {
     ibv_post_send(qp, &wr_array[i], &bad_wr);
 }
-// 批量轮询
+// Batch polling
 int completed = 0;
 while (completed < batch_size) {
     completed += ibv_poll_cq(cq, batch_size - completed, &wc_array[completed]);
@@ -211,46 +211,46 @@ while (completed < batch_size) {
 
 ---
 
-## 4.10 调试方法
+## 4.10 Debugging Methods
 
-### WC状态码
+### WC Status Codes
 
-| 状态码 | 说明 |
-|--------|------|
-| `IBV_WC_SUCCESS` | 成功 |
-| `IBV_WC_LOC_LEN_ERR` | 长度错误 |
-| `IBV_WC_WR_FLUSH_ERR` | 队列已刷新 |
-| `IBV_WC_REM_INV_REQ_ERR` | 远程无效请求 |
+| Status Code | Description |
+|------------|-------------|
+| `IBV_WC_SUCCESS` | Success |
+| `IBV_WC_LOC_LEN_ERR` | Length error |
+| `IBV_WC_WR_FLUSH_ERR` | Queue flushed |
+| `IBV_WC_REM_INV_REQ_ERR` | Remote invalid request |
 
-### 调试命令
+### Debugging Commands
 
 ```bash
-# 查看设备
+# View devices
 ibv_devices
 ibv_devinfo -d mlx5_0
 
-# 带宽测试
+# Bandwidth test
 perftest -z -d mlx5_0 -c -n 100000 -s 4096
 
-# 内核日志
+# Kernel log
 dmesg | grep -i rdma
 ```
 
 ---
 
-## 练习题
+## Exercises
 
-1. **选择题**: 场景：需要实现分布式锁，应该使用哪种操作？
-2. **编程题**: 修改Send/Recv示例，添加ImmData传递消息类型
-3. **分析题**: RDMA Write和Send/Recv的性能差异原因
-4. **实践题**: 实现一个简单的分布式计数器
+1. **Multiple choice**: Scenario: You need to implement a distributed lock, which operation should you use?
+2. **Programming**: Modify the Send/Recv example, add ImmData to pass message types
+3. **Analysis**: Reasons for the performance difference between RDMA Write and Send/Recv
+4. **Hands-on**: Implement a simple distributed counter
 
 ---
 
-## 下一步
+## Next Step
 
-恭喜完成RDMA入门！接下来可以：
+Congratulations on completing the RDMA introduction! Next you can:
 
-- 阅读[NVIDIA官方文档](https://docs.nvidia.com/networking/display/rdmaawareprogrammingv17)
-- 研究RDMA在分布式机器学习中的应用
-- 搭建实际的RDMA测试环境
+- Read the [NVIDIA official documentation](https://docs.nvidia.com/networking/display/rdmaawareprogrammingv17)
+- Study the application of RDMA in distributed machine learning
+- Set up an actual RDMA test environment

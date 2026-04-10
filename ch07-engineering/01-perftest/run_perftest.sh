@@ -1,56 +1,56 @@
 #!/bin/bash
 #
-# RDMA perftest 自动化基准测试脚本
+# RDMA perftest Automated Benchmark Script
 #
-# 功能：
-#   - 检测 perftest 工具是否安装
-#   - 自动运行延迟和带宽测试 (loopback 模式)
-#   - 测试多种消息大小，生成带宽曲线
-#   - 格式化输出测试结果
+# Features:
+#   - Detects if perftest tools are installed
+#   - Automatically runs latency and bandwidth tests (loopback mode)
+#   - Tests multiple message sizes, generates bandwidth curve
+#   - Formatted output of test results
 #
-# 用法：
-#   ./run_perftest.sh [设备名]
-#   ./run_perftest.sh              # 使用默认设备
-#   ./run_perftest.sh rxe0         # 指定设备
+# Usage:
+#   ./run_perftest.sh [device_name]
+#   ./run_perftest.sh              # Use default device
+#   ./run_perftest.sh rxe0         # Specify device
 #
-# 说明：
-#   本脚本使用 loopback 模式 (服务端在后台运行，客户端连接本机)。
-#   如需跨机器测试，请手动在两台机器上分别运行 server 和 client。
+# Notes:
+#   This script uses loopback mode (server runs in background, client connects to localhost).
+#   For cross-machine testing, manually run server and client on two separate machines.
 #
 
 set -e
 
-# ========== 颜色定义 ==========
+# ========== Color Definitions ==========
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
-NC='\033[0m'  # 无颜色
+NC='\033[0m'  # No color
 
-# ========== 全局变量 ==========
-DEVICE=""                    # RDMA 设备名
-PORT=18515                   # loopback 测试用端口基址
-DURATION=5                   # 每个测试运行秒数
-RESULT_DIR="/tmp/perftest_results_$$"  # 临时结果目录
-PASS_COUNT=0                 # 通过的测试数
-FAIL_COUNT=0                 # 失败的测试数
+# ========== Global Variables ==========
+DEVICE=""                    # RDMA device name
+PORT=18515                   # Base port for loopback tests
+DURATION=5                   # Duration of each test in seconds
+RESULT_DIR="/tmp/perftest_results_$$"  # Temporary results directory
+PASS_COUNT=0                 # Number of passed tests
+FAIL_COUNT=0                 # Number of failed tests
 
-# ========== 辅助函数 ==========
+# ========== Helper Functions ==========
 
-# 打印带颜色的信息
-info()  { echo -e "${BLUE}[信息]${NC} $*"; }
-ok()    { echo -e "${GREEN}[成功]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[警告]${NC} $*"; }
-fail()  { echo -e "${RED}[失败]${NC} $*"; }
+# Print colored messages
+info()  { echo -e "${BLUE}[Info]${NC} $*"; }
+ok()    { echo -e "${GREEN}[Pass]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[Warn]${NC} $*"; }
+fail()  { echo -e "${RED}[Fail]${NC} $*"; }
 
-# 打印分隔线
+# Print separator line
 separator() {
     echo -e "${CYAN}$(printf '=%.0s' {1..70})${NC}"
 }
 
-# 打印章节标题
+# Print section title
 section() {
     echo ""
     separator
@@ -58,32 +58,32 @@ section() {
     separator
 }
 
-# 清理后台进程和临时文件
+# Cleanup background processes and temp files
 cleanup() {
-    # 杀掉所有后台 perftest 进程
+    # Kill all background perftest processes
     jobs -p 2>/dev/null | xargs -r kill 2>/dev/null || true
     wait 2>/dev/null || true
     rm -rf "$RESULT_DIR"
 }
 trap cleanup EXIT
 
-# ========== 环境检查 ==========
+# ========== Environment Checks ==========
 
-# 检查单个 perftest 工具是否存在
+# Check if a single perftest tool exists
 check_tool() {
     local tool=$1
     if command -v "$tool" &>/dev/null; then
         echo -e "  ${GREEN}✓${NC} $tool"
         return 0
     else
-        echo -e "  ${RED}✗${NC} $tool (未安装)"
+        echo -e "  ${RED}✗${NC} $tool (not installed)"
         return 1
     fi
 }
 
-# 检查所有 perftest 工具
+# Check all perftest tools
 check_perftest_tools() {
-    section "检查 perftest 工具"
+    section "Checking perftest Tools"
 
     local all_ok=0
     local tools=(ib_send_lat ib_send_bw ib_write_lat ib_write_bw ib_read_lat ib_read_bw)
@@ -96,50 +96,50 @@ check_perftest_tools() {
 
     if [ $all_ok -ne 0 ]; then
         echo ""
-        warn "部分 perftest 工具缺失，请安装："
+        warn "Some perftest tools are missing, please install:"
         echo "  sudo apt-get install perftest"
-        echo "  # 或"
+        echo "  # or"
         echo "  sudo yum install perftest"
         exit 1
     fi
 
-    ok "所有 perftest 工具已就绪"
+    ok "All perftest tools are ready"
 }
 
-# 检查 RDMA 设备
+# Check RDMA device
 check_device() {
-    section "检查 RDMA 设备"
+    section "Checking RDMA Device"
 
     if [ -n "$DEVICE" ]; then
-        # 用户指定了设备，验证是否存在
+        # User specified a device, verify it exists
         if ! ibv_devinfo -d "$DEVICE" &>/dev/null; then
-            fail "设备 '$DEVICE' 不存在"
-            echo "  可用设备："
-            ibv_devices 2>/dev/null | tail -n +2 || echo "  (无设备)"
+            fail "Device '$DEVICE' does not exist"
+            echo "  Available devices:"
+            ibv_devices 2>/dev/null | tail -n +2 || echo "  (none)"
             exit 1
         fi
-        ok "使用指定设备: $DEVICE"
+        ok "Using specified device: $DEVICE"
     else
-        # 自动检测第一个设备
+        # Auto-detect the first device
         DEVICE=$(ibv_devices 2>/dev/null | awk 'NR>2 && NF>0 {print $1; exit}')
         if [ -z "$DEVICE" ]; then
-            fail "未检测到 RDMA 设备"
-            echo "  请确认已加载 RDMA 驱动 (如 SoftRoCE: rdma link add rxe0 type rxe netdev eth0)"
+            fail "No RDMA device detected"
+            echo "  Please verify RDMA driver is loaded (e.g., SoftRoCE: rdma link add rxe0 type rxe netdev eth0)"
             exit 1
         fi
-        ok "自动检测到设备: $DEVICE"
+        ok "Auto-detected device: $DEVICE"
     fi
 
-    # 打印设备基本信息
+    # Print basic device info
     echo ""
-    info "设备信息："
+    info "Device info:"
     ibv_devinfo -d "$DEVICE" 2>/dev/null | head -15 | sed 's/^/  /'
 }
 
-# ========== 测试函数 ==========
+# ========== Test Functions ==========
 
-# 运行延迟测试 (loopback)
-#   参数: $1=工具名 $2=消息大小 $3=测试描述
+# Run latency test (loopback)
+#   Args: $1=tool_name $2=message_size $3=test_description
 run_latency_test() {
     local tool=$1
     local size=$2
@@ -148,41 +148,41 @@ run_latency_test() {
     local server_out="$RESULT_DIR/${tool}_${size}_server.txt"
     local client_out="$RESULT_DIR/${tool}_${size}_client.txt"
 
-    info "测试: $desc ($tool, 消息大小=${size}B)"
+    info "Test: $desc ($tool, msg_size=${size}B)"
 
-    # 启动服务端 (后台)
+    # Start server (background)
     $tool -d "$DEVICE" -s "$size" -p "$port" -n 1000 > "$server_out" 2>&1 &
     local server_pid=$!
-    sleep 1  # 等待服务端就绪
+    sleep 1  # Wait for server to be ready
 
-    # 启动客户端
+    # Start client
     if $tool -d "$DEVICE" -s "$size" -p "$port" -n 1000 localhost > "$client_out" 2>&1; then
         wait $server_pid 2>/dev/null || true
 
-        # 解析延迟结果 (从客户端输出中提取)
+        # Parse latency results (extract from client output)
         local avg_lat=$(grep -E '^\s+[0-9]' "$client_out" | tail -1 | awk '{print $2}')
         local p99_lat=$(grep -E '^\s+[0-9]' "$client_out" | tail -1 | awk '{print $5}')
 
         if [ -n "$avg_lat" ]; then
-            ok "  平均延迟: ${avg_lat} μs"
-            [ -n "$p99_lat" ] && echo -e "  ${BLUE}  P99 延迟: ${p99_lat} μs${NC}"
+            ok "  Average latency: ${avg_lat} us"
+            [ -n "$p99_lat" ] && echo -e "  ${BLUE}  P99 latency: ${p99_lat} us${NC}"
             PASS_COUNT=$((PASS_COUNT + 1))
         else
-            # 尝试从输出中提取其他格式
-            echo -e "  ${YELLOW}输出:${NC}"
+            # Try to extract other format from output
+            echo -e "  ${YELLOW}Output:${NC}"
             tail -5 "$client_out" | sed 's/^/    /'
             PASS_COUNT=$((PASS_COUNT + 1))
         fi
     else
         wait $server_pid 2>/dev/null || true
-        fail "  测试失败"
+        fail "  Test failed"
         tail -3 "$client_out" 2>/dev/null | sed 's/^/    /'
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 }
 
-# 运行带宽测试 (loopback)
-#   参数: $1=工具名 $2=消息大小 $3=测试描述
+# Run bandwidth test (loopback)
+#   Args: $1=tool_name $2=message_size $3=test_description
 run_bandwidth_test() {
     local tool=$1
     local size=$2
@@ -191,76 +191,76 @@ run_bandwidth_test() {
     local server_out="$RESULT_DIR/${tool}_${size}_server.txt"
     local client_out="$RESULT_DIR/${tool}_${size}_client.txt"
 
-    info "测试: $desc ($tool, 消息大小=${size}B)"
+    info "Test: $desc ($tool, msg_size=${size}B)"
 
-    # 启动服务端 (后台)
+    # Start server (background)
     $tool -d "$DEVICE" -s "$size" -p "$port" -D "$DURATION" > "$server_out" 2>&1 &
     local server_pid=$!
     sleep 1
 
-    # 启动客户端
+    # Start client
     if $tool -d "$DEVICE" -s "$size" -p "$port" -D "$DURATION" localhost > "$client_out" 2>&1; then
         wait $server_pid 2>/dev/null || true
 
-        # 解析带宽结果
+        # Parse bandwidth results
         local bw_gbps=$(grep -E '^\s+[0-9]' "$client_out" | tail -1 | awk '{print $(NF-1)}')
         local bw_mbps=$(grep -E '^\s+[0-9]' "$client_out" | tail -1 | awk '{print $(NF)}')
         local msg_rate=$(grep -E '^\s+[0-9]' "$client_out" | tail -1 | awk '{print $(NF-2)}')
 
         if [ -n "$bw_gbps" ]; then
-            ok "  带宽: ${bw_gbps} Gb/s  (${bw_mbps} MB/s)"
-            [ -n "$msg_rate" ] && echo -e "  ${BLUE}  消息速率: ${msg_rate} Mpps${NC}"
+            ok "  Bandwidth: ${bw_gbps} Gb/s  (${bw_mbps} MB/s)"
+            [ -n "$msg_rate" ] && echo -e "  ${BLUE}  Message rate: ${msg_rate} Mpps${NC}"
             PASS_COUNT=$((PASS_COUNT + 1))
         else
-            echo -e "  ${YELLOW}输出:${NC}"
+            echo -e "  ${YELLOW}Output:${NC}"
             tail -5 "$client_out" | sed 's/^/    /'
             PASS_COUNT=$((PASS_COUNT + 1))
         fi
     else
         wait $server_pid 2>/dev/null || true
-        fail "  测试失败"
+        fail "  Test failed"
         tail -3 "$client_out" 2>/dev/null | sed 's/^/    /'
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 }
 
-# ========== 主测试套件 ==========
+# ========== Main Test Suite ==========
 
-# 测试 1: 基础延迟测试
+# Test 1: Basic latency test
 test_basic_latency() {
-    section "测试 1: 基础延迟测试"
+    section "Test 1: Basic Latency Test"
     echo ""
-    echo "  测量 Send 操作的半程延迟 (half-round-trip)"
+    echo "  Measuring Send operation half-round-trip latency"
     echo ""
 
-    run_latency_test "ib_send_lat" 64 "Send 延迟 (64B 小消息)"
+    run_latency_test "ib_send_lat" 64 "Send latency (64B small message)"
     echo ""
-    run_latency_test "ib_write_lat" 64 "RDMA Write 延迟 (64B)"
+    run_latency_test "ib_write_lat" 64 "RDMA Write latency (64B)"
 }
 
-# 测试 2: 基础带宽测试
+# Test 2: Basic bandwidth test
 test_basic_bandwidth() {
-    section "测试 2: 基础带宽测试"
+    section "Test 2: Basic Bandwidth Test"
     echo ""
-    echo "  测量大消息下的最大带宽"
+    echo "  Measuring maximum bandwidth with large messages"
     echo ""
 
-    run_bandwidth_test "ib_write_bw" 1048576 "RDMA Write 带宽 (1MB 大消息)"
+    run_bandwidth_test "ib_write_bw" 1048576 "RDMA Write bandwidth (1MB large message)"
     echo ""
-    run_bandwidth_test "ib_read_bw" 1048576 "RDMA Read 带宽 (1MB 大消息)"
+    run_bandwidth_test "ib_read_bw" 1048576 "RDMA Read bandwidth (1MB large message)"
     echo ""
-    run_bandwidth_test "ib_send_bw" 1048576 "Send 带宽 (1MB 大消息)"
+    run_bandwidth_test "ib_send_bw" 1048576 "Send bandwidth (1MB large message)"
 }
 
-# 测试 3: 带宽曲线 (多种消息大小)
+# Test 3: Bandwidth curve (multiple message sizes)
 test_bandwidth_curve() {
-    section "测试 3: 带宽 vs 消息大小 曲线 (RDMA Write)"
+    section "Test 3: Bandwidth vs Message Size Curve (RDMA Write)"
     echo ""
-    echo "  测试不同消息大小下的带宽变化趋势"
+    echo "  Testing bandwidth variation across different message sizes"
     echo ""
 
-    # 表头
-    printf "  ${BOLD}%-12s %-15s %-15s${NC}\n" "消息大小" "带宽(Gb/s)" "消息速率(Mpps)"
+    # Table header
+    printf "  ${BOLD}%-12s %-15s %-15s${NC}\n" "Msg Size" "BW (Gb/s)" "MsgRate (Mpps)"
     printf "  %-12s %-15s %-15s\n" "--------" "----------" "-------------"
 
     local sizes=(64 256 1024 4096 65536 1048576)
@@ -273,12 +273,12 @@ test_bandwidth_curve() {
         local server_out="$RESULT_DIR/curve_server_${size}.txt"
         local client_out="$RESULT_DIR/curve_client_${size}.txt"
 
-        # 启动服务端
+        # Start server
         ib_write_bw -d "$DEVICE" -s "$size" -p "$port" -D "$DURATION" > "$server_out" 2>&1 &
         local server_pid=$!
         sleep 1
 
-        # 启动客户端
+        # Start client
         if ib_write_bw -d "$DEVICE" -s "$size" -p "$port" -D "$DURATION" localhost > "$client_out" 2>&1; then
             wait $server_pid 2>/dev/null || true
 
@@ -295,62 +295,62 @@ test_bandwidth_curve() {
     done
 }
 
-# ========== 结果汇总 ==========
+# ========== Results Summary ==========
 print_summary() {
-    section "测试汇总"
+    section "Test Summary"
     echo ""
-    echo -e "  设备:     ${BOLD}$DEVICE${NC}"
-    echo -e "  通过:     ${GREEN}$PASS_COUNT${NC}"
-    echo -e "  失败:     ${RED}$FAIL_COUNT${NC}"
+    echo -e "  Device:     ${BOLD}$DEVICE${NC}"
+    echo -e "  Passed:     ${GREEN}$PASS_COUNT${NC}"
+    echo -e "  Failed:     ${RED}$FAIL_COUNT${NC}"
     echo ""
 
-    # 性能指标说明
-    echo -e "${BOLD}  指标说明:${NC}"
+    # Metrics explanation
+    echo -e "${BOLD}  Metrics Explained:${NC}"
     echo "  ┌─────────────────────────────────────────────────────┐"
-    echo "  │ BW (Gb/s)   带宽，千兆位/秒                        │"
+    echo "  │ BW (Gb/s)   Bandwidth, gigabits per second          │"
     echo "  │             1 Gb/s = 125 MB/s = 128000 KB/s        │"
-    echo "  │ BW (MB/s)   带宽，兆字节/秒                        │"
-    echo "  │ Latency(μs) 半程延迟，微秒                         │"
-    echo "  │             典型值: IB=1-2μs, RoCE=3-5μs, SoftRoCE>10μs│"
-    echo "  │ MsgRate     每秒消息数 (百万条/秒)                  │"
-    echo "  │             小消息场景下更关注消息速率而非带宽      │"
+    echo "  │ BW (MB/s)   Bandwidth, megabytes per second         │"
+    echo "  │ Latency(us) Half-round-trip latency, microseconds   │"
+    echo "  │             Typical: IB=1-2us, RoCE=3-5us, SoftRoCE>10us│"
+    echo "  │ MsgRate     Messages per second (millions/sec)      │"
+    echo "  │             More relevant than BW for small messages │"
     echo "  └─────────────────────────────────────────────────────┘"
     echo ""
 
     if [ $FAIL_COUNT -eq 0 ]; then
-        ok "所有测试通过!"
+        ok "All tests passed!"
     else
-        warn "有 $FAIL_COUNT 个测试失败，请检查设备状态和日志"
+        warn "$FAIL_COUNT test(s) failed, please check device status and logs"
     fi
 }
 
-# ========== 主流程 ==========
+# ========== Main Flow ==========
 
 main() {
     echo ""
     echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════╗${NC}"
-    echo -e "${BOLD}${CYAN}║    RDMA perftest 自动化基准测试          ║${NC}"
+    echo -e "${BOLD}${CYAN}║    RDMA perftest Automated Benchmark     ║${NC}"
     echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════╝${NC}"
     echo ""
 
-    # 解析参数
+    # Parse arguments
     if [ -n "$1" ]; then
         DEVICE="$1"
     fi
 
-    # 创建临时结果目录
+    # Create temporary results directory
     mkdir -p "$RESULT_DIR"
 
-    # 环境检查
+    # Environment checks
     check_perftest_tools
     check_device
 
-    # 运行测试
+    # Run tests
     test_basic_latency
     test_basic_bandwidth
     test_bandwidth_curve
 
-    # 汇总
+    # Summary
     print_summary
 }
 

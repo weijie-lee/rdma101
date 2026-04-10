@@ -1,215 +1,217 @@
-# 第八章：高级专题
+# Chapter 8: Advanced Topics
 
-**GPUDirect RDMA、NCCL 与用户态驱动原理**
-
----
-
-## 章节概述
-
-本章介绍三个 RDMA 高级专题，帮助你理解 RDMA 在 AI/HPC 场景中的实际应用，
-以及底层用户态驱动的工作原理。这些知识不是编写基础 RDMA 程序所必须的，
-但对于理解现代 AI 集群通信和性能调优非常重要。
+**GPUDirect RDMA, NCCL, and Userspace Driver Internals**
 
 ---
 
-## 目录
+## Chapter Overview
 
-| 节 | 内容 | 说明 |
-|----|------|------|
-| [01-gpudirect](./01-gpudirect/) | GPUDirect RDMA | GPU 显存直接走 RDMA，跳过 CPU 内存拷贝 |
-| [02-nccl](./02-nccl/) | NCCL 与 RDMA | NVIDIA 集合通信库如何利用 RDMA |
-| [03-userspace-driver](./03-userspace-driver/) | 用户态驱动原理 | ibv_post_send 为何不需要系统调用 |
+This chapter covers three advanced RDMA topics to help you understand how RDMA is used
+in real-world AI/HPC scenarios, as well as the inner workings of the userspace driver.
+These concepts are not required for writing basic RDMA programs, but they are very important
+for understanding modern AI cluster communication and performance tuning.
+
+---
+
+## Table of Contents
+
+| Section | Content | Description |
+|---------|---------|-------------|
+| [01-gpudirect](./01-gpudirect/) | GPUDirect RDMA | Direct RDMA access to GPU memory, bypassing CPU memory copies |
+| [02-nccl](./02-nccl/) | NCCL and RDMA | How NVIDIA Collective Communication Library leverages RDMA |
+| [03-userspace-driver](./03-userspace-driver/) | Userspace Driver Internals | Why ibv_post_send does not require a system call |
 
 ---
 
 ## 01 - GPUDirect RDMA
 
-### 什么是 GPUDirect RDMA？
+### What is GPUDirect RDMA?
 
-传统的 GPU 网络通信路径：
-
-```
-GPU显存 → cudaMemcpy → CPU内存 → RDMA Send → 网络 → RDMA Recv → CPU内存 → cudaMemcpy → GPU显存
-```
-
-GPUDirect RDMA 的路径：
+Traditional GPU network communication path:
 
 ```
-GPU显存 → RDMA Send → 网络 → RDMA Recv → GPU显存
+GPU Memory -> cudaMemcpy -> CPU Memory -> RDMA Send -> Network -> RDMA Recv -> CPU Memory -> cudaMemcpy -> GPU Memory
 ```
 
-**关键优势**：
-- 跳过了两次 CPU 内存拷贝 (cudaMemcpy)
-- 降低延迟，提高带宽利用率
-- GPU 和 NIC 之间通过 PCIe 直接传输数据
-
-### 工作原理
+GPUDirect RDMA path:
 
 ```
-┌──────────────┐     PCIe     ┌──────────────┐
-│   GPU (CUDA) │ ◄──────────► │  RDMA NIC    │
-│   显存       │   直接DMA    │  (HCA)       │
-└──────────────┘              └──────────────┘
-       │                            │
-       └────── 跳过 CPU 内存 ───────┘
+GPU Memory -> RDMA Send -> Network -> RDMA Recv -> GPU Memory
 ```
 
-1. **nvidia_peermem 模块**：让 RDMA NIC 能够直接访问 GPU 显存
-2. **CUDA API**：`cuMemAlloc()` 分配 GPU 显存
-3. **Verbs API**：`ibv_reg_mr()` 注册 GPU 显存为 MR
-4. **数据传输**：NIC 通过 PCIe 直接从 GPU 显存读写数据
+**Key advantages**:
+- Eliminates two CPU memory copies (cudaMemcpy)
+- Reduces latency, improves bandwidth utilization
+- Data is transferred directly between GPU and NIC via PCIe
 
-### 前置条件
+### How It Works
 
-| 条件 | 说明 |
-|------|------|
-| NVIDIA GPU | 支持 CUDA 的 GPU (Kepler 或更新) |
-| nvidia_peermem | 内核模块，CUDA 11.4+ 自带 |
-| Mellanox NIC | ConnectX-4 或更新的 RDMA 网卡 |
-| PCIe 拓扑 | GPU 和 NIC 最好在同一 PCIe switch 下 |
+```
++----------------+     PCIe     +----------------+
+|   GPU (CUDA)   | <----------> |   RDMA NIC     |
+|   VRAM         |  Direct DMA  |   (HCA)        |
++----------------+              +----------------+
+       |                              |
+       +------ Bypasses CPU Memory ---+
+```
 
-### 本节文件
+1. **nvidia_peermem module**: Allows RDMA NIC to directly access GPU memory
+2. **CUDA API**: `cuMemAlloc()` allocates GPU memory
+3. **Verbs API**: `ibv_reg_mr()` registers GPU memory as MR
+4. **Data transfer**: NIC reads/writes data directly from/to GPU memory via PCIe
 
-| 文件 | 说明 |
-|------|------|
-| `gpudirect_check.sh` | 一键检查 GPUDirect 环境是否就绪 |
-| `gpudirect_framework.c` | GPUDirect RDMA 代码框架 (支持有/无 CUDA 编译) |
+### Prerequisites
+
+| Requirement | Description |
+|-------------|-------------|
+| NVIDIA GPU | CUDA-capable GPU (Kepler or newer) |
+| nvidia_peermem | Kernel module, included with CUDA 11.4+ |
+| Mellanox NIC | ConnectX-4 or newer RDMA NIC |
+| PCIe topology | GPU and NIC should ideally be under the same PCIe switch |
+
+### Files in This Section
+
+| File | Description |
+|------|-------------|
+| `gpudirect_check.sh` | One-click GPUDirect environment readiness check |
+| `gpudirect_framework.c` | GPUDirect RDMA code framework (supports compilation with/without CUDA) |
 
 ---
 
 ## 02 - NCCL (NVIDIA Collective Communications Library)
 
-### 什么是 NCCL？
+### What is NCCL?
 
-NCCL 是 NVIDIA 的集合通信库，专为多 GPU / 多节点 AI 训练设计。
-它是 PyTorch `torch.distributed`、TensorFlow、DeepSpeed 等框架的底层通信后端。
+NCCL is NVIDIA's collective communication library, designed for multi-GPU / multi-node AI training.
+It is the underlying communication backend for PyTorch `torch.distributed`, TensorFlow, DeepSpeed, and other frameworks.
 
-### NCCL 与 RDMA 的关系
+### NCCL and RDMA Relationship
 
 ```
-┌───────────────────────────────────────┐
-│         PyTorch / TensorFlow          │  ← 用户代码
-├───────────────────────────────────────┤
-│         torch.distributed / Horovod   │  ← 分布式框架
-├───────────────────────────────────────┤
-│                NCCL                   │  ← 集合通信库
-├──────────┬────────────┬───────────────┤
-│  IB Verbs│  Socket    │   NVLink      │  ← 传输层
-│  (RDMA)  │  (TCP/IP)  │  (节点内)     │
-└──────────┴────────────┴───────────────┘
++---------------------------------------+
+|         PyTorch / TensorFlow          |  <- User code
++---------------------------------------+
+|         torch.distributed / Horovod   |  <- Distributed framework
++---------------------------------------+
+|                NCCL                   |  <- Collective communication library
++----------+------------+---------------+
+|  IB Verbs|  Socket    |   NVLink      |  <- Transport layer
+|  (RDMA)  |  (TCP/IP)  |  (Intra-node) |
++----------+------------+---------------+
 ```
 
-当 NCCL 检测到 RDMA 网卡时，自动使用 IB Verbs 进行节点间通信：
-- 支持 GPUDirect RDMA（GPU 显存直接走网络）
-- 支持 RDMA Write（零拷贝传输）
-- 自动选择最优的 NIC-GPU 亲和性
+When NCCL detects an RDMA NIC, it automatically uses IB Verbs for inter-node communication:
+- Supports GPUDirect RDMA (GPU memory goes directly to the network)
+- Supports RDMA Write (zero-copy transfer)
+- Automatically selects optimal NIC-GPU affinity
 
-### 关键环境变量
+### Key Environment Variables
 
-| 变量 | 作用 | 常用值 |
-|------|------|--------|
-| `NCCL_IB_DISABLE` | 禁用 IB | 0 (启用) / 1 (禁用) |
-| `NCCL_IB_HCA` | 指定使用的 HCA | `mlx5_0` |
-| `NCCL_IB_GID_INDEX` | RoCE GID 索引 | `3` (RoCE v2) |
-| `NCCL_NET_GDR_LEVEL` | GPUDirect 级别 | `5` (跨节点) |
-| `NCCL_DEBUG` | 调试级别 | `INFO` / `WARN` / `TRACE` |
-| `NCCL_DEBUG_SUBSYS` | 调试子系统 | `NET` / `INIT` / `ALL` |
-| `NCCL_SOCKET_IFNAME` | 控制面网口 | `eth0` |
+| Variable | Purpose | Common Values |
+|----------|---------|---------------|
+| `NCCL_IB_DISABLE` | Disable IB | 0 (enable) / 1 (disable) |
+| `NCCL_IB_HCA` | Specify HCA to use | `mlx5_0` |
+| `NCCL_IB_GID_INDEX` | RoCE GID index | `3` (RoCE v2) |
+| `NCCL_NET_GDR_LEVEL` | GPUDirect level | `5` (cross-node) |
+| `NCCL_DEBUG` | Debug level | `INFO` / `WARN` / `TRACE` |
+| `NCCL_DEBUG_SUBSYS` | Debug subsystem | `NET` / `INIT` / `ALL` |
+| `NCCL_SOCKET_IFNAME` | Control plane interface | `eth0` |
 
-### 本节文件
+### Files in This Section
 
-| 文件 | 说明 |
-|------|------|
-| `nccl_env_check.sh` | 检查 NCCL 安装和环境变量配置 |
+| File | Description |
+|------|-------------|
+| `nccl_env_check.sh` | Check NCCL installation and environment variable configuration |
 
 ---
 
-## 03 - 用户态驱动原理
+## 03 - Userspace Driver Internals
 
-### 为什么 ibv_post_send 不需要系统调用？
+### Why doesn't ibv_post_send require a system call?
 
-这是 RDMA 高性能的核心秘密之一。传统网络编程中，每次 `send()` 都需要
-一次系统调用（上下文切换 ~1μs）。而 RDMA 的 `ibv_post_send()` 是纯用户态操作。
+This is one of the core secrets behind RDMA's high performance. In traditional network programming,
+each `send()` requires a system call (context switch ~1us). However, RDMA's `ibv_post_send()` is
+a pure userspace operation.
 
-### 工作原理
+### How It Works
 
 ```
-┌─────────────────────────────────────────────────┐
-│                   用户态                          │
-│                                                   │
-│  应用程序                                         │
-│    │                                              │
-│    ▼                                              │
-│  libibverbs (libmlx5.so / libhfi1.so)            │
-│    │                                              │
-│    ▼                                              │
-│  写 WQE 到 Send Queue (mmap 的共享内存)          │
-│    │                                              │
-│    ▼                                              │
-│  Doorbell Write (写 HCA 寄存器, 也是 mmap 的)    │
-│    │                                              │
-├────┼──────────────────────────────────────────────┤
-│    │              内核态                           │
-│    │  (ibv_post_send 不经过这里!)                 │
-├────┼──────────────────────────────────────────────┤
-│    ▼              硬件                             │
-│  HCA 读取 WQE → DMA 读取数据 → 发送到网络        │
-└─────────────────────────────────────────────────┘
++-------------------------------------------------+
+|                   Userspace                      |
+|                                                  |
+|  Application                                     |
+|    |                                             |
+|    v                                             |
+|  libibverbs (libmlx5.so / libhfi1.so)           |
+|    |                                             |
+|    v                                             |
+|  Write WQE to Send Queue (mmap'd shared memory) |
+|    |                                             |
+|    v                                             |
+|  Doorbell Write (write HCA register, also mmap'd)|
+|    |                                             |
++----+---------------------------------------------+
+|    |              Kernel space                    |
+|    |  (ibv_post_send does NOT go through here!)  |
++----+---------------------------------------------+
+|    v              Hardware                        |
+|  HCA reads WQE -> DMA reads data -> sends to network |
++-------------------------------------------------+
 ```
 
-### 关键步骤
+### Key Steps
 
-1. **初始化阶段** (需要内核参与，通过 ioctl)：
-   - `ibv_open_device()` → `open("/dev/infiniband/uverbs0")`
-   - `ibv_create_qp()` → `ioctl()` 让内核分配 QP 资源
-   - 内核通过 `mmap()` 将 QP 的 Send/Recv Queue 映射到用户态
+1. **Initialization phase** (requires kernel involvement via ioctl):
+   - `ibv_open_device()` -> `open("/dev/infiniband/uverbs0")`
+   - `ibv_create_qp()` -> `ioctl()` to have the kernel allocate QP resources
+   - Kernel maps QP's Send/Recv Queue to userspace via `mmap()`
 
-2. **数据通路** (纯用户态，无系统调用)：
-   - `ibv_post_send()` → 直接写 WQE 到 mmap 的 SQ 内存
-   - 写 Doorbell 寄存器通知 HCA → 也是 mmap 的 MMIO 地址
-   - HCA 通过 DMA 读取数据并发送
+2. **Data path** (pure userspace, no system calls):
+   - `ibv_post_send()` -> directly writes WQE to mmap'd SQ memory
+   - Writes Doorbell register to notify HCA -> also an mmap'd MMIO address
+   - HCA reads data via DMA and sends it
 
-3. **完成通知**：
-   - `ibv_poll_cq()` → 直接读 mmap 的 CQ 内存，也是纯用户态
+3. **Completion notification**:
+   - `ibv_poll_cq()` -> directly reads mmap'd CQ memory, also pure userspace
 
-### 哪些操作需要内核，哪些不需要？
+### Which operations require the kernel and which don't?
 
-| 操作 | 是否需要内核 | 原因 |
-|------|-------------|------|
-| `ibv_open_device` | 需要 | 打开 `/dev/infiniband/uverbs*` |
-| `ibv_alloc_pd` | 需要 | ioctl 分配内核资源 |
-| `ibv_reg_mr` | 需要 | ioctl 锁定物理页面 |
-| `ibv_create_cq` | 需要 | ioctl 分配 + mmap 映射 |
-| `ibv_create_qp` | 需要 | ioctl 分配 + mmap 映射 |
-| `ibv_modify_qp` | 需要 | ioctl 修改 QP 状态 |
-| `ibv_post_send` | **不需要** | 直接写 mmap 内存 + doorbell |
-| `ibv_post_recv` | **不需要** | 直接写 mmap 内存 + doorbell |
-| `ibv_poll_cq` | **不需要** | 直接读 mmap 内存 |
+| Operation | Requires Kernel | Reason |
+|-----------|----------------|--------|
+| `ibv_open_device` | Yes | Opens `/dev/infiniband/uverbs*` |
+| `ibv_alloc_pd` | Yes | ioctl to allocate kernel resources |
+| `ibv_reg_mr` | Yes | ioctl to pin physical pages |
+| `ibv_create_cq` | Yes | ioctl to allocate + mmap mapping |
+| `ibv_create_qp` | Yes | ioctl to allocate + mmap mapping |
+| `ibv_modify_qp` | Yes | ioctl to modify QP state |
+| `ibv_post_send` | **No** | Directly writes mmap'd memory + doorbell |
+| `ibv_post_recv` | **No** | Directly writes mmap'd memory + doorbell |
+| `ibv_poll_cq` | **No** | Directly reads mmap'd memory |
 
-### 本节文件
+### Files in This Section
 
-| 文件 | 说明 |
-|------|------|
-| `userspace_driver_trace.sh` | 用 strace 追踪 RDMA 程序的系统调用 |
-
----
-
-## 学习建议
-
-1. **先理解原理**：本章重在概念理解，不需要你立即动手写 GPUDirect 代码
-2. **运行检查脚本**：即使没有 GPU，也可以运行检查脚本了解环境要求
-3. **strace 实验**：`userspace_driver_trace.sh` 是最值得动手尝试的——它能让你亲眼看到 RDMA 用户态驱动的工作方式
-4. **结合前面的章节**：回顾 ch05 的 Send/Recv 程序，思考 `ibv_post_send()` 背后发生了什么
+| File | Description |
+|------|-------------|
+| `userspace_driver_trace.sh` | Use strace to trace RDMA program system calls |
 
 ---
 
-## 延伸阅读
+## Study Recommendations
 
-- [NVIDIA GPUDirect RDMA 官方文档](https://docs.nvidia.com/cuda/gpudirect-rdma/)
-- [NCCL 官方文档](https://docs.nvidia.com/deeplearning/nccl/)
-- [Mellanox RDMA Aware Programming 用户手册](https://docs.nvidia.com/networking/display/rdmacore/)
-- [libibverbs 源码 (rdma-core)](https://github.com/linux-rdma/rdma-core)
+1. **Understand the concepts first**: This chapter focuses on conceptual understanding; you don't need to write GPUDirect code right away
+2. **Run the check scripts**: Even without a GPU, you can run the check scripts to understand the environment requirements
+3. **strace experiment**: `userspace_driver_trace.sh` is the most worthwhile hands-on exercise — it lets you see the RDMA userspace driver in action with your own eyes
+4. **Review earlier chapters**: Go back to the Send/Recv program in ch05 and think about what happens behind the scenes when `ibv_post_send()` is called
 
 ---
 
-*下一章: [ch09-quickref](../ch09-quickref/) - API 速查手册与工具集*
+## Further Reading
+
+- [NVIDIA GPUDirect RDMA Official Documentation](https://docs.nvidia.com/cuda/gpudirect-rdma/)
+- [NCCL Official Documentation](https://docs.nvidia.com/deeplearning/nccl/)
+- [Mellanox RDMA Aware Programming User Manual](https://docs.nvidia.com/networking/display/rdmacore/)
+- [libibverbs Source Code (rdma-core)](https://github.com/linux-rdma/rdma-core)
+
+---
+
+*Next chapter: [ch09-quickref](../ch09-quickref/) - API Quick Reference and Toolkit*

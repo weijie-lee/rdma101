@@ -1,12 +1,12 @@
 /**
- * 原子操作示例
- * 使用 Fetch & Add 和 Compare & Swap 实现计数器
+ * Atomic Operations Example
+ * Uses Fetch & Add and Compare & Swap to implement a counter
  *
- * 支持 IB/RoCE 双模自动检测:
- *   - IB 模式: 使用 LID 寻址
- *   - RoCE 模式: 使用 GID 寻址 (ah_attr.is_global=1 + GRH)
+ * Supports IB/RoCE dual-mode auto-detection:
+ *   - IB mode: uses LID addressing
+ *   - RoCE mode: uses GID addressing (ah_attr.is_global=1 + GRH)
  *
- * 编译: gcc -Wall -O2 -g -o atomic_ops atomic_ops.c \
+ * Build: gcc -Wall -O2 -g -o atomic_ops atomic_ops.c \
  *        -I../../common -L../../common -lrdma_utils -libverbs
  */
 
@@ -23,7 +23,7 @@
 struct connection_info {
     uint32_t qp_num;
     uint16_t lid;
-    union ibv_gid gid;      /* GID (RoCE 模式) */
+    union ibv_gid gid;      /* GID (RoCE mode) */
     uint64_t counter_addr;
     uint32_t counter_rkey;
 };
@@ -33,12 +33,12 @@ struct rdma_ctx {
     struct ibv_pd *pd;
     struct ibv_cq *cq;
     struct ibv_qp *qp;
-    struct ibv_mr *mr;         /* counter 的 MR */
-    struct ibv_mr *result_mr;  /* result_buf 的 MR */
-    uint64_t *counter;   /* 计数器 */
-    char *result_buf;    /* 存储原子操作结果 */
-    int is_roce;         /* IB/RoCE 自动检测 */
-    union ibv_gid gid;   /* 本地 GID */
+    struct ibv_mr *mr;         /* Counter MR */
+    struct ibv_mr *result_mr;  /* result_buf MR */
+    uint64_t *counter;   /* Counter */
+    char *result_buf;    /* Storage for atomic operation results */
+    int is_roce;         /* IB/RoCE auto-detection */
+    union ibv_gid gid;   /* Local GID */
 };
 
 int init_ctx(struct rdma_ctx *ctx)
@@ -53,12 +53,12 @@ int init_ctx(struct rdma_ctx *ctx)
     ctx->pd = ibv_alloc_pd(ctx->ctx);
     ctx->cq = ibv_create_cq(ctx->ctx, 256, NULL, NULL, 0);
 
-    /* 检测传输层类型: IB 还是 RoCE */
+    /* Detect transport layer type: IB or RoCE */
     enum rdma_transport transport = detect_transport(ctx->ctx, 1);
     ctx->is_roce = (transport == RDMA_TRANSPORT_ROCE);
-    printf("传输层类型: %s\n", transport_str(transport));
+    printf("Transport layer type: %s\n", transport_str(transport));
 
-    /* RoCE 模式下查询 GID */
+    /* Query GID in RoCE mode */
     if (ctx->is_roce) {
         ibv_query_gid(ctx->ctx, 1, RDMA_DEFAULT_GID_INDEX, &ctx->gid);
     }
@@ -71,15 +71,15 @@ int init_ctx(struct rdma_ctx *ctx)
                  .max_send_sge = 1, .max_recv_sge = 1 },
     };
     ctx->qp = ibv_create_qp(ctx->pd, &attr);
-    
-    /* 分配计数器内存 - 对齐到缓存行（原子操作要求 8 字节对齐，64 字节避免 false sharing） */
+
+    /* Allocate counter memory - aligned to cache line (atomic ops require 8-byte alignment, 64 bytes avoids false sharing) */
     if (posix_memalign((void**)&ctx->counter, 64, sizeof(uint64_t)) != 0 ||
         posix_memalign((void**)&ctx->result_buf, 64, BUFFER_SIZE) != 0) {
         perror("posix_memalign");
         return -1;
     }
     *ctx->counter = 0;
-    
+
     ctx->mr = ibv_reg_mr(ctx->pd, ctx->counter, sizeof(uint64_t),
                          IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
                          IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC);
@@ -88,7 +88,7 @@ int init_ctx(struct rdma_ctx *ctx)
         return -1;
     }
 
-    /* 为 result_buf 单独注册 MR（原子操作结果写回本地内存） */
+    /* Register separate MR for result_buf (atomic operation result written back to local memory) */
     ctx->result_mr = ibv_reg_mr(ctx->pd, ctx->result_buf, sizeof(uint64_t),
                                 IBV_ACCESS_LOCAL_WRITE);
     if (!ctx->result_mr) {
@@ -118,7 +118,7 @@ int qp_connect(struct rdma_ctx *ctx, uint32_t remote_qp, uint16_t remote_lid,
         return -1;
     }
 
-    /* RTR - 支持 IB/RoCE 双模 */
+    /* RTR - supports IB/RoCE dual mode */
     memset(&attr, 0, sizeof(attr));
     attr.qp_state = IBV_QPS_RTR;
     attr.path_mtu = IBV_MTU_256;
@@ -130,14 +130,14 @@ int qp_connect(struct rdma_ctx *ctx, uint32_t remote_qp, uint16_t remote_lid,
     attr.ah_attr.port_num = 1;
 
     if (ctx->is_roce) {
-        /* RoCE 模式: 使用 GID 寻址 */
+        /* RoCE mode: use GID addressing */
         attr.ah_attr.is_global = 1;
         attr.ah_attr.grh.dgid = *remote_gid;
         attr.ah_attr.grh.sgid_index = RDMA_DEFAULT_GID_INDEX;
         attr.ah_attr.grh.hop_limit = 64;
         attr.ah_attr.dlid = 0;
     } else {
-        /* IB 模式: 使用 LID 寻址 */
+        /* IB mode: use LID addressing */
         attr.ah_attr.is_global = 0;
         attr.ah_attr.dlid = remote_lid;
     }
@@ -169,17 +169,17 @@ int qp_connect(struct rdma_ctx *ctx, uint32_t remote_qp, uint16_t remote_lid,
     return 0;
 }
 
-/* Fetch and Add - 原子递增计数器 */
+/* Fetch and Add - atomically increment counter */
 int atomic_fetch_add(struct rdma_ctx *ctx, uint64_t remote_addr,
                      uint32_t remote_rkey, uint64_t add_value)
 {
-    /* 结果（旧值）将写回到本地 result_buf */
+    /* Result (old value) will be written back to local result_buf */
     struct ibv_sge sge = {
         .addr = (uint64_t)ctx->result_buf,
         .length = sizeof(uint64_t),
         .lkey = ctx->result_mr->lkey,
     };
-    
+
     struct ibv_send_wr wr = {
         .opcode = IBV_WR_ATOMIC_FETCH_AND_ADD,
         .wr.atomic = {
@@ -191,14 +191,14 @@ int atomic_fetch_add(struct rdma_ctx *ctx, uint64_t remote_addr,
         .num_sge = 1,
         .send_flags = IBV_SEND_SIGNALED,
     };
-    
+
     struct ibv_send_wr *bad;
     if (ibv_post_send(ctx->qp, &wr, &bad) != 0) {
         perror("ibv_post_send (FAA)");
         return -1;
     }
 
-    /* 等待完成 */
+    /* Wait for completion */
     struct ibv_wc wc;
     while (ibv_poll_cq(ctx->cq, 1, &wc) == 0);
 
@@ -207,11 +207,11 @@ int atomic_fetch_add(struct rdma_ctx *ctx, uint64_t remote_addr,
         return -1;
     }
 
-    /* result_buf 包含旧值 */
+    /* result_buf contains the old value */
     return 0;
 }
 
-/* Compare and Swap - 原子条件更新 */
+/* Compare and Swap - atomic conditional update */
 int atomic_cas(struct rdma_ctx *ctx, uint64_t remote_addr,
                uint32_t remote_rkey, uint64_t expected, uint64_t new_value)
 {
@@ -220,20 +220,20 @@ int atomic_cas(struct rdma_ctx *ctx, uint64_t remote_addr,
         .length = sizeof(uint64_t),
         .lkey = ctx->result_mr->lkey,
     };
-    
+
     struct ibv_send_wr wr = {
         .opcode = IBV_WR_ATOMIC_CMP_AND_SWP,
         .wr.atomic = {
             .remote_addr = remote_addr,
             .rkey = remote_rkey,
-            .compare_add = expected,  /* 期望值 */
-            .swap = new_value,        /* 新值 */
+            .compare_add = expected,  /* Expected value */
+            .swap = new_value,        /* New value */
         },
         .sg_list = &sge,
         .num_sge = 1,
         .send_flags = IBV_SEND_SIGNALED,
     };
-    
+
     struct ibv_send_wr *bad;
     if (ibv_post_send(ctx->qp, &wr, &bad) != 0) {
         perror("ibv_post_send (CAS)");
@@ -242,7 +242,7 @@ int atomic_cas(struct rdma_ctx *ctx, uint64_t remote_addr,
 
     struct ibv_wc wc;
     while (ibv_poll_cq(ctx->cq, 1, &wc) == 0);
-    
+
     return (wc.status == IBV_WC_SUCCESS) ? 0 : -1;
 }
 
@@ -305,7 +305,7 @@ int main(int argc, char *argv[])
                (unsigned long)local_info.counter_addr, local_info.counter_rkey);
         printf("Server: initial counter = %lu\n", *ctx.counter);
 
-        /* 等待客户端操作 */
+        /* Wait for client operations */
         sleep(5);
         printf("Server: final counter = %lu\n", *ctx.counter);
     } else {
@@ -315,26 +315,26 @@ int main(int argc, char *argv[])
 
         sleep(1);
 
-        /* 第一次 FAA: +1 */
+        /* First FAA: +1 */
         if (atomic_fetch_add(&ctx, remote_info.counter_addr, remote_info.counter_rkey, 1) == 0) {
             printf("Client: FAA +1, old value = %lu\n", *(uint64_t*)ctx.result_buf);
         }
 
-        /* 第二次 FAA: +10 */
+        /* Second FAA: +10 */
         if (atomic_fetch_add(&ctx, remote_info.counter_addr, remote_info.counter_rkey, 10) == 0) {
             printf("Client: FAA +10, old value = %lu\n", *(uint64_t*)ctx.result_buf);
         }
 
-        /* CAS: 尝试将计数器从当前值（第二次 FAA 的旧值 +10）改为 100 */
+        /* CAS: try to change counter from current value (second FAA's old value +10) to 100 */
         uint64_t current = *(uint64_t*)ctx.result_buf + 10;
         if (atomic_cas(&ctx, remote_info.counter_addr, remote_info.counter_rkey, current, 100) == 0) {
-            /* result_buf 返回的是 CAS 操作前的旧值；若旧值 == expected，则交换成功 */
+            /* result_buf returns the old value before CAS; if old value == expected, swap succeeded */
             int swapped = (*(uint64_t*)ctx.result_buf == current);
             printf("Client: CAS expected=%lu, swapped=%s\n", current, swapped ? "YES" : "NO");
         }
     }
 
-    /* 清理资源 */
+    /* Cleanup resources */
     if (ctx.result_mr) ibv_dereg_mr(ctx.result_mr);
     if (ctx.mr) ibv_dereg_mr(ctx.mr);
     if (ctx.result_buf) free(ctx.result_buf);

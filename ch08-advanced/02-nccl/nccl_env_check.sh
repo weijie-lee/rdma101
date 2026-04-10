@@ -1,16 +1,18 @@
 #!/bin/bash
 # =============================================================================
-# NCCL 环境检查脚本
+# NCCL Environment Check Script
 #
-# 功能: 检查 NCCL 安装情况、环境变量配置，并提供常用命令示例
+# Function: Check NCCL installation status, environment variable configuration,
+#           and provide common command examples
 #
-# NCCL (NVIDIA Collective Communications Library) 是 AI 分布式训练
-# 的核心通信库，底层可使用 RDMA (IB Verbs) 进行节点间高速通信。
+# NCCL (NVIDIA Collective Communications Library) is the core communication
+# library for AI distributed training. It can use RDMA (IB Verbs) as the
+# underlying transport for high-speed inter-node communication.
 #
-# 用法: bash nccl_env_check.sh
+# Usage: bash nccl_env_check.sh
 # =============================================================================
 
-# ========== 颜色定义 ==========
+# ========== Color Definitions ==========
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -18,7 +20,7 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# ========== 辅助函数 ==========
+# ========== Helper Functions ==========
 print_ok()   { echo -e "  [${GREEN} OK ${NC}] $1"; }
 print_warn() { echo -e "  [${YELLOW}WARN${NC}] $1"; }
 print_fail() { echo -e "  [${RED}FAIL${NC}] $1"; }
@@ -26,17 +28,17 @@ print_info() { echo -e "         ${BLUE}↳ $1${NC}"; }
 
 echo ""
 echo -e "${CYAN}=============================================${NC}"
-echo -e "${CYAN}    NCCL 环境检查${NC}"
+echo -e "${CYAN}    NCCL Environment Check${NC}"
 echo -e "${CYAN}=============================================${NC}"
 echo ""
 
-# --- 检查 1: NCCL 库安装 ---
-echo -e "${CYAN}[检查 1] NCCL 库安装${NC}"
+# --- Check 1: NCCL library installation ---
+echo -e "${CYAN}[Check 1] NCCL Library Installation${NC}"
 NCCL_LIB=""
-# 方式 1: ldconfig 查找
+# Method 1: Search via ldconfig
 NCCL_LIB=$(ldconfig -p 2>/dev/null | grep "libnccl.so" | head -1 | awk '{print $NF}')
 if [ -z "$NCCL_LIB" ]; then
-    # 方式 2: 常见路径查找
+    # Method 2: Search common paths
     for dir in /usr/lib /usr/lib64 /usr/local/lib /usr/local/cuda/lib64; do
         if [ -f "$dir/libnccl.so" ] || [ -f "$dir/libnccl.so.2" ]; then
             NCCL_LIB="$dir/libnccl.so"
@@ -46,15 +48,15 @@ if [ -z "$NCCL_LIB" ]; then
 fi
 
 if [ -n "$NCCL_LIB" ]; then
-    print_ok "NCCL 库已安装: $NCCL_LIB"
+    print_ok "NCCL library installed: $NCCL_LIB"
 else
-    print_fail "NCCL 库未找到"
-    print_info "安装: apt install libnccl2 libnccl-dev 或从 NVIDIA 官网下载"
+    print_fail "NCCL library not found"
+    print_info "Install: apt install libnccl2 libnccl-dev or download from NVIDIA website"
 fi
 
-# --- 检查 2: NCCL 头文件 ---
+# --- Check 2: NCCL header file ---
 echo ""
-echo -e "${CYAN}[检查 2] NCCL 头文件${NC}"
+echo -e "${CYAN}[Check 2] NCCL Header File${NC}"
 NCCL_HEADER=""
 for dir in /usr/include /usr/local/include /usr/local/cuda/include; do
     if [ -f "$dir/nccl.h" ]; then
@@ -64,76 +66,76 @@ for dir in /usr/include /usr/local/include /usr/local/cuda/include; do
 done
 
 if [ -n "$NCCL_HEADER" ]; then
-    print_ok "nccl.h 已找到: $NCCL_HEADER"
-    # 提取 NCCL 版本号
+    print_ok "nccl.h found: $NCCL_HEADER"
+    # Extract NCCL version
     NCCL_MAJOR=$(grep "NCCL_MAJOR" "$NCCL_HEADER" 2>/dev/null | head -1 | awk '{print $3}')
     NCCL_MINOR=$(grep "NCCL_MINOR" "$NCCL_HEADER" 2>/dev/null | head -1 | awk '{print $3}')
     NCCL_PATCH=$(grep "NCCL_PATCH" "$NCCL_HEADER" 2>/dev/null | head -1 | awk '{print $3}')
     if [ -n "$NCCL_MAJOR" ]; then
-        print_info "NCCL 版本: ${NCCL_MAJOR}.${NCCL_MINOR}.${NCCL_PATCH}"
+        print_info "NCCL version: ${NCCL_MAJOR}.${NCCL_MINOR}.${NCCL_PATCH}"
     fi
 else
-    print_warn "nccl.h 未找到"
-    print_info "安装: apt install libnccl-dev"
+    print_warn "nccl.h not found"
+    print_info "Install: apt install libnccl-dev"
 fi
 
-# --- 检查 3: nccl-tests ---
+# --- Check 3: nccl-tests ---
 echo ""
-echo -e "${CYAN}[检查 3] nccl-tests (性能测试工具)${NC}"
+echo -e "${CYAN}[Check 3] nccl-tests (Performance Testing Tool)${NC}"
 if command -v all_reduce_perf &>/dev/null; then
-    print_ok "all_reduce_perf 已安装: $(which all_reduce_perf)"
+    print_ok "all_reduce_perf installed: $(which all_reduce_perf)"
 elif [ -f "/usr/local/bin/all_reduce_perf" ]; then
     print_ok "all_reduce_perf: /usr/local/bin/all_reduce_perf"
 else
-    print_warn "nccl-tests 未安装"
-    print_info "安装方法:"
+    print_warn "nccl-tests not installed"
+    print_info "Installation:"
     print_info "  git clone https://github.com/NVIDIA/nccl-tests.git"
     print_info "  cd nccl-tests && make MPI=1 MPI_HOME=/usr/local/mpi"
 fi
 
-# --- 检查 4: 关键环境变量 ---
+# --- Check 4: Key environment variables ---
 echo ""
-echo -e "${CYAN}[检查 4] NCCL 关键环境变量${NC}"
+echo -e "${CYAN}[Check 4] NCCL Key Environment Variables${NC}"
 echo ""
 
-# 定义环境变量及其说明
+# Define environment variables and their descriptions
 declare -A ENV_DESC
 ENV_DESC=(
-    ["NCCL_IB_DISABLE"]="是否禁用 InfiniBand (0=启用 RDMA, 1=禁用回退 TCP)"
-    ["NCCL_IB_HCA"]="指定使用的 HCA 设备名 (如 mlx5_0, mlx5_1)"
-    ["NCCL_IB_GID_INDEX"]="RoCE GID 索引 (RoCE v2 通常用 3)"
-    ["NCCL_NET_GDR_LEVEL"]="GPUDirect RDMA 级别 (0=禁用, 5=跨节点)"
-    ["NCCL_DEBUG"]="调试输出级别 (WARN/INFO/TRACE)"
-    ["NCCL_DEBUG_SUBSYS"]="调试子系统过滤 (NET/INIT/COLL/ALL)"
-    ["NCCL_SOCKET_IFNAME"]="TCP 控制面使用的网络接口 (如 eth0)"
+    ["NCCL_IB_DISABLE"]="Whether to disable InfiniBand (0=enable RDMA, 1=disable fallback to TCP)"
+    ["NCCL_IB_HCA"]="Specify HCA device name to use (e.g., mlx5_0, mlx5_1)"
+    ["NCCL_IB_GID_INDEX"]="RoCE GID index (RoCE v2 typically uses 3)"
+    ["NCCL_NET_GDR_LEVEL"]="GPUDirect RDMA level (0=disabled, 5=cross-node)"
+    ["NCCL_DEBUG"]="Debug output level (WARN/INFO/TRACE)"
+    ["NCCL_DEBUG_SUBSYS"]="Debug subsystem filter (NET/INIT/COLL/ALL)"
+    ["NCCL_SOCKET_IFNAME"]="Network interface for TCP control plane (e.g., eth0)"
 )
 
-# 按顺序检查各环境变量
+# Check each environment variable in order
 for var in NCCL_IB_DISABLE NCCL_IB_HCA NCCL_IB_GID_INDEX \
            NCCL_NET_GDR_LEVEL NCCL_DEBUG NCCL_DEBUG_SUBSYS \
            NCCL_SOCKET_IFNAME; do
-    VALUE="${!var}"    # 间接引用获取变量值
+    VALUE="${!var}"    # Indirect reference to get variable value
     DESC="${ENV_DESC[$var]}"
     if [ -n "$VALUE" ]; then
         echo -e "  ${GREEN}$var${NC} = ${YELLOW}$VALUE${NC}"
     else
-        echo -e "  ${BLUE}$var${NC} = (未设置)"
+        echo -e "  ${BLUE}$var${NC} = (not set)"
     fi
     echo -e "    ${BLUE}# $DESC${NC}"
 done
 
-# --- 常用命令示例 ---
+# --- Common command examples ---
 echo ""
 echo -e "${CYAN}=============================================${NC}"
-echo -e "${CYAN}    常用 NCCL 命令示例${NC}"
+echo -e "${CYAN}    Common NCCL Command Examples${NC}"
 echo -e "${CYAN}=============================================${NC}"
 echo ""
 
-echo -e "${YELLOW}# 1. 开启 NCCL 调试输出 (查看 RDMA 通信细节)${NC}"
+echo -e "${YELLOW}# 1. Enable NCCL debug output (view RDMA communication details)${NC}"
 echo "NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=NET python train.py"
 echo ""
 
-echo -e "${YELLOW}# 2. PyTorch 分布式初始化 + NCCL 调试${NC}"
+echo -e "${YELLOW}# 2. PyTorch distributed init + NCCL debug${NC}"
 echo 'NCCL_DEBUG=INFO python -c "'
 echo '  import torch'
 echo '  import torch.distributed as dist'
@@ -142,29 +144,29 @@ echo '  print(f\"Rank {dist.get_rank()} initialized\")'
 echo '"'
 echo ""
 
-echo -e "${YELLOW}# 3. nccl-tests 性能测试 (单机多卡)${NC}"
+echo -e "${YELLOW}# 3. nccl-tests performance test (single node, multi-GPU)${NC}"
 echo "all_reduce_perf -b 1M -e 1G -f 2 -g 4"
-echo "  # -b: 起始消息大小 (1MB)"
-echo "  # -e: 结束消息大小 (1GB)"
-echo "  # -f: 大小递增倍数"
-echo "  # -g: 每节点 GPU 数"
+echo "  # -b: starting message size (1MB)"
+echo "  # -e: ending message size (1GB)"
+echo "  # -f: size increment factor"
+echo "  # -g: number of GPUs per node"
 echo ""
 
-echo -e "${YELLOW}# 4. nccl-tests 多机测试 (通过 MPI 启动)${NC}"
+echo -e "${YELLOW}# 4. nccl-tests multi-node test (launched via MPI)${NC}"
 echo "mpirun -np 8 --host node1:4,node2:4 \\"
 echo "  -x NCCL_IB_HCA=mlx5_0 \\"
 echo "  -x NCCL_NET_GDR_LEVEL=5 \\"
 echo "  all_reduce_perf -b 1M -e 1G -f 2 -g 1"
 echo ""
 
-echo -e "${YELLOW}# 5. 强制使用 RDMA (排除 TCP 干扰)${NC}"
+echo -e "${YELLOW}# 5. Force RDMA usage (eliminate TCP interference)${NC}"
 echo "NCCL_IB_DISABLE=0 NCCL_SOCKET_IFNAME=eth0 NCCL_IB_HCA=mlx5_0 python train.py"
 echo ""
 
-echo -e "${YELLOW}# 6. 强制使用 TCP (RDMA 环境有问题时的回退方案)${NC}"
+echo -e "${YELLOW}# 6. Force TCP usage (fallback when RDMA environment has issues)${NC}"
 echo "NCCL_IB_DISABLE=1 NCCL_SOCKET_IFNAME=eth0 python train.py"
 echo ""
 
-echo -e "${BLUE}提示: NCCL 会自动检测并选择最优传输方式。${NC}"
-echo -e "${BLUE}      只有在自动检测不正确时才需要手动设置环境变量。${NC}"
+echo -e "${BLUE}Tip: NCCL automatically detects and selects the optimal transport.${NC}"
+echo -e "${BLUE}     Environment variables only need to be set manually when auto-detection is incorrect.${NC}"
 echo ""

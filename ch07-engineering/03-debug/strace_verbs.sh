@@ -1,33 +1,33 @@
 #!/bin/bash
 #
-# strace RDMA 程序分析脚本
+# strace RDMA Program Analysis Script
 #
-# 功能：
-#   - 使用 strace 追踪 RDMA 程序的系统调用
-#   - 自动标注 RDMA 相关的系统调用含义
-#   - 区分哪些操作走内核态 vs 用户态
+# Features:
+#   - Uses strace to trace system calls of RDMA programs
+#   - Auto-annotates RDMA-related system call meanings
+#   - Distinguishes which operations go through kernel vs user space
 #
-# 用法:
-#   ./strace_verbs.sh <程序路径> [程序参数...]
+# Usage:
+#   ./strace_verbs.sh <program_path> [program_args...]
 #
-# 示例:
+# Examples:
 #   ./strace_verbs.sh ./inline_data
 #   ./strace_verbs.sh /usr/bin/ibv_devinfo
 #
-# 说明:
-#   RDMA (libibverbs) 的设计是"内核旁路 (kernel bypass)"。
-#   但资源创建/销毁仍需要走内核 (通过 ioctl)，
-#   而数据传输 (post_send/post_recv/poll_cq) 是纯用户态操作。
+# Notes:
+#   RDMA (libibverbs) is designed for "kernel bypass".
+#   But resource creation/destruction still goes through kernel (via ioctl),
+#   while data transfer (post_send/post_recv/poll_cq) is pure user-space.
 #
-#   本脚本追踪的系统调用:
-#   - open/openat: 打开设备文件
-#   - mmap/munmap: 映射 NIC 寄存器到用户空间
-#   - ioctl:       内核态操作 (创建 QP/CQ/MR 等)
-#   - close:       关闭文件描述符
-#   - write:       可能的事件通知
+#   System calls traced by this script:
+#   - open/openat: Open device files
+#   - mmap/munmap: Map NIC registers to user space
+#   - ioctl:       Kernel operations (create QP/CQ/MR, etc.)
+#   - close:       Close file descriptors
+#   - write:       Possible event notifications
 #
 
-# ========== 颜色定义 ==========
+# ========== Color Definitions ==========
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -36,11 +36,11 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# ========== 参数检查 ==========
+# ========== Argument Check ==========
 if [ $# -lt 1 ]; then
-    echo -e "${BOLD}用法: $0 <程序路径> [程序参数...]${NC}"
+    echo -e "${BOLD}Usage: $0 <program_path> [program_args...]${NC}"
     echo ""
-    echo "示例:"
+    echo "Examples:"
     echo "  $0 ./inline_data"
     echo "  $0 /usr/bin/ibv_devinfo"
     exit 1
@@ -50,108 +50,108 @@ PROG="$1"
 shift
 PROG_ARGS="$@"
 
-# 检查程序是否存在
+# Check if program exists
 if [ ! -f "$PROG" ] && ! command -v "$PROG" &>/dev/null; then
-    echo -e "${RED}[错误]${NC} 程序 '$PROG' 不存在"
+    echo -e "${RED}[Error]${NC} Program '$PROG' does not exist"
     exit 1
 fi
 
-# 检查 strace 是否安装
+# Check if strace is installed
 if ! command -v strace &>/dev/null; then
-    echo -e "${RED}[错误]${NC} strace 未安装"
-    echo "  安装: sudo apt-get install strace"
+    echo -e "${RED}[Error]${NC} strace is not installed"
+    echo "  Install: sudo apt-get install strace"
     exit 1
 fi
 
-# ========== 运行 strace ==========
+# ========== Run strace ==========
 echo -e "${BOLD}${CYAN}╔═══════════════════════════════════════╗${NC}"
-echo -e "${BOLD}${CYAN}║   strace RDMA 程序系统调用分析        ║${NC}"
+echo -e "${BOLD}${CYAN}║   strace RDMA Program System Call Analysis   ║${NC}"
 echo -e "${BOLD}${CYAN}╚═══════════════════════════════════════╝${NC}"
 echo ""
-echo -e "${BLUE}[信息]${NC} 目标程序: $PROG $PROG_ARGS"
-echo -e "${BLUE}[信息]${NC} 追踪调用: open, openat, close, mmap, munmap, ioctl, write"
+echo -e "${BLUE}[Info]${NC} Target program: $PROG $PROG_ARGS"
+echo -e "${BLUE}[Info]${NC} Tracing calls: open, openat, close, mmap, munmap, ioctl, write"
 echo ""
 
-# 运行 strace 并保存输出
+# Run strace and save output
 STRACE_OUT=$(mktemp /tmp/strace_rdma_XXXXXX.log)
 trap "rm -f $STRACE_OUT" EXIT
 
 strace -e trace=open,openat,close,mmap,munmap,ioctl,write \
        -f -tt "$PROG" $PROG_ARGS 2>"$STRACE_OUT"
 
-# ========== 分析和注释输出 ==========
+# ========== Analyze and Annotate Output ==========
 echo ""
-echo -e "${BOLD}${CYAN}━━━ RDMA 相关系统调用分析 ━━━${NC}"
+echo -e "${BOLD}${CYAN}━━━ RDMA-Related System Call Analysis ━━━${NC}"
 echo ""
 
-# 统计计数
+# Statistics counters
 UVERBS_OPEN=0
 MMAP_COUNT=0
 IOCTL_COUNT=0
 
 while IFS= read -r line; do
-    # 过滤和注释 RDMA 相关调用
+    # Filter and annotate RDMA-related calls
 
-    # /dev/infiniband/uverbs* → 打开 Verbs 设备文件
+    # /dev/infiniband/uverbs* -> Opening Verbs device file
     if echo "$line" | grep -q '/dev/infiniband/uverbs'; then
-        echo -e "${GREEN}[Verbs设备]${NC} $line"
-        echo -e "    ${YELLOW}→ 打开 Verbs 设备文件 (用户态 Verbs 的入口点)${NC}"
+        echo -e "${GREEN}[Verbs Device]${NC} $line"
+        echo -e "    ${YELLOW}-> Opening Verbs device file (entry point for user-space Verbs)${NC}"
         UVERBS_OPEN=$((UVERBS_OPEN + 1))
 
-    # /dev/infiniband/rdma_cm → 打开 RDMA CM 设备
+    # /dev/infiniband/rdma_cm -> Opening RDMA CM device
     elif echo "$line" | grep -q '/dev/infiniband/rdma_cm'; then
         echo -e "${GREEN}[RDMA CM]${NC} $line"
-        echo -e "    ${YELLOW}→ 打开 RDMA CM 设备 (连接管理)${NC}"
+        echo -e "    ${YELLOW}-> Opening RDMA CM device (connection management)${NC}"
 
-    # mmap 调用 → 映射网卡寄存器/内存
+    # mmap call -> Mapping NIC registers/memory
     elif echo "$line" | grep -q "^.*mmap("; then
-        echo -e "${BLUE}[内存映射]${NC} $line"
-        echo -e "    ${YELLOW}→ 映射网卡寄存器/DoorBell/缓冲区到用户空间${NC}"
-        echo -e "    ${YELLOW}  (这是 kernel bypass 的关键: 数据通路不再经过内核)${NC}"
+        echo -e "${BLUE}[Memory Map]${NC} $line"
+        echo -e "    ${YELLOW}-> Mapping NIC registers/DoorBell/buffers to user space${NC}"
+        echo -e "    ${YELLOW}  (This is key to kernel bypass: data path no longer goes through kernel)${NC}"
         MMAP_COUNT=$((MMAP_COUNT + 1))
 
-    # ioctl 调用 → 内核态操作
+    # ioctl call -> Kernel operation
     elif echo "$line" | grep -q "^.*ioctl("; then
-        echo -e "${RED}[内核操作]${NC} $line"
-        echo -e "    ${YELLOW}→ 内核态操作 (资源创建: PD/MR/CQ/QP, 或状态修改)${NC}"
+        echo -e "${RED}[Kernel Op]${NC} $line"
+        echo -e "    ${YELLOW}-> Kernel operation (resource creation: PD/MR/CQ/QP, or state modification)${NC}"
         IOCTL_COUNT=$((IOCTL_COUNT + 1))
 
-    # /sys/class/infiniband → 查询设备 sysfs 信息
+    # /sys/class/infiniband -> Querying device sysfs info
     elif echo "$line" | grep -q '/sys/class/infiniband'; then
-        echo -e "${CYAN}[设备查询]${NC} $line"
-        echo -e "    ${YELLOW}→ 通过 sysfs 查询设备/端口属性${NC}"
+        echo -e "${CYAN}[Device Query]${NC} $line"
+        echo -e "    ${YELLOW}-> Querying device/port attributes via sysfs${NC}"
     fi
 
 done < "$STRACE_OUT"
 
-# ========== 统计汇总 ==========
+# ========== Statistics Summary ==========
 echo ""
-echo -e "${BOLD}${CYAN}━━━ 系统调用统计 ━━━${NC}"
+echo -e "${BOLD}${CYAN}━━━ System Call Statistics ━━━${NC}"
 echo ""
-echo -e "  Verbs 设备打开次数:  ${GREEN}$UVERBS_OPEN${NC}"
-echo -e "  mmap 映射次数:       ${BLUE}$MMAP_COUNT${NC}"
-echo -e "  ioctl (内核操作):    ${RED}$IOCTL_COUNT${NC}"
+echo -e "  Verbs device open count:  ${GREEN}$UVERBS_OPEN${NC}"
+echo -e "  mmap mapping count:       ${BLUE}$MMAP_COUNT${NC}"
+echo -e "  ioctl (kernel ops):       ${RED}$IOCTL_COUNT${NC}"
 echo ""
 
-echo -e "${BOLD}━━━ RDMA 数据通路说明 ━━━${NC}"
+echo -e "${BOLD}━━━ RDMA Data Path Explanation ━━━${NC}"
 echo ""
 echo "  ┌─────────────────────────────────────────────────────────┐"
-echo "  │ 内核态操作 (走 ioctl):                                  │"
-echo "  │   - ibv_open_device()    打开设备                       │"
-echo "  │   - ibv_alloc_pd()       创建保护域                     │"
-echo "  │   - ibv_reg_mr()         注册内存区域                   │"
-echo "  │   - ibv_create_cq()      创建完成队列                   │"
-echo "  │   - ibv_create_qp()      创建队列对                     │"
-echo "  │   - ibv_modify_qp()      修改 QP 状态                   │"
-echo "  │   - ibv_destroy_*()      销毁资源                       │"
+echo "  │ Kernel operations (via ioctl):                          │"
+echo "  │   - ibv_open_device()    Open device                    │"
+echo "  │   - ibv_alloc_pd()       Create protection domain       │"
+echo "  │   - ibv_reg_mr()         Register memory region         │"
+echo "  │   - ibv_create_cq()      Create completion queue        │"
+echo "  │   - ibv_create_qp()      Create queue pair              │"
+echo "  │   - ibv_modify_qp()      Modify QP state                │"
+echo "  │   - ibv_destroy_*()      Destroy resources              │"
 echo "  ├─────────────────────────────────────────────────────────┤"
-echo "  │ 用户态操作 (纯 CPU, 不走内核):                          │"
-echo "  │   - ibv_post_send()      发布发送请求 (写 DoorBell)     │"
-echo "  │   - ibv_post_recv()      发布接收请求 (写 DoorBell)     │"
-echo "  │   - ibv_poll_cq()        轮询完成队列 (读共享内存)      │"
-echo "  │   这些操作不会出现在 strace 中!                         │"
+echo "  │ User-space operations (pure CPU, no kernel):            │"
+echo "  │   - ibv_post_send()      Post send request (write DoorBell) │"
+echo "  │   - ibv_post_recv()      Post recv request (write DoorBell) │"
+echo "  │   - ibv_poll_cq()        Poll completion queue (read shared memory) │"
+echo "  │   These operations will NOT appear in strace!           │"
 echo "  └─────────────────────────────────────────────────────────┘"
 echo ""
-echo -e "${GREEN}提示: 真正的数据传输 (post_send/recv/poll_cq) 是纯用户态的，${NC}"
-echo -e "${GREEN}      strace 无法追踪。这就是 RDMA 'kernel bypass' 的核心。${NC}"
+echo -e "${GREEN}Tip: The actual data transfer (post_send/recv/poll_cq) is pure user-space,${NC}"
+echo -e "${GREEN}     strace cannot trace them. This is the core of RDMA 'kernel bypass'.${NC}"
 echo ""

@@ -1,26 +1,26 @@
 /**
- * ib_port_detail.c - InfiniBand 端口属性完整查询程序
+ * ib_port_detail.c - InfiniBand Port Attribute Full Query Program
  *
- * 功能：
- *   - 打开每个 RDMA 设备
- *   - 对每个端口调用 ibv_query_port()
- *   - 打印 ibv_port_attr 结构体的所有字段，附中文注释
- *   - 使用 common/rdma_utils.h 的 detect_transport() 检测传输类型
+ * Features:
+ *   - Open each RDMA device
+ *   - Call ibv_query_port() for each port
+ *   - Print all fields of the ibv_port_attr structure with English comments
+ *   - Use detect_transport() from common/rdma_utils.h to detect transport type
  *
- * 编译:
+ * Compile:
  *   gcc -o ib_port_detail ib_port_detail.c -I../../common \
  *       ../../common/librdma_utils.a -libverbs
  *
- * 或使用 Makefile:
+ * Or use Makefile:
  *   make
  *
- * 预期输出:
- *   ===== 设备: rxe_0 =====
- *     传输类型: RoCE
- *     --- 端口 1 属性 ---
- *     state            = 4 (ACTIVE)          -- 端口状态
- *     max_mtu          = 4096                -- 最大支持 MTU
- *     active_mtu       = 1024                -- 当前活动 MTU
+ * Expected Output:
+ *   ===== Device: rxe_0 =====
+ *     Transport Type: RoCE
+ *     --- Port 1 Attributes ---
+ *     state            = 4 (ACTIVE)          -- Port state
+ *     max_mtu          = 4096                -- Maximum supported MTU
+ *     active_mtu       = 1024                -- Current active MTU
  *     ...
  */
 
@@ -30,28 +30,28 @@
 #include <errno.h>
 #include <infiniband/verbs.h>
 
-/* 引入公共工具库 */
+/* Include common utility library */
 #include "rdma_utils.h"
 
-/* ========== 辅助函数：将枚举值转为可读字符串 ========== */
+/* ========== Helper Functions: Convert enum values to readable strings ========== */
 
 /**
- * port_state_str - 将端口状态枚举转为中文字符串
+ * port_state_str - Convert port state enum to readable string
  */
 static const char *port_state_str(enum ibv_port_state state)
 {
     switch (state) {
-    case IBV_PORT_NOP:          return "NOP (无操作/保留)";
-    case IBV_PORT_DOWN:         return "DOWN (端口关闭)";
-    case IBV_PORT_INIT:         return "INIT (初始化中)";
-    case IBV_PORT_ARMED:        return "ARMED (已就绪，等待激活)";
-    case IBV_PORT_ACTIVE:       return "ACTIVE (活动)";
-    default:                    return "UNKNOWN (未知)";
+    case IBV_PORT_NOP:          return "NOP (No Operation/Reserved)";
+    case IBV_PORT_DOWN:         return "DOWN (Port Down)";
+    case IBV_PORT_INIT:         return "INIT (Initializing)";
+    case IBV_PORT_ARMED:        return "ARMED (Ready, Waiting for Activation)";
+    case IBV_PORT_ACTIVE:       return "ACTIVE (Active)";
+    default:                    return "UNKNOWN (Unknown)";
     }
 }
 
 /**
- * mtu_to_bytes - 将 ibv_mtu 枚举转为实际字节数
+ * mtu_to_bytes - Convert ibv_mtu enum to actual byte count
  */
 static int mtu_to_bytes(enum ibv_mtu mtu)
 {
@@ -66,20 +66,20 @@ static int mtu_to_bytes(enum ibv_mtu mtu)
 }
 
 /**
- * link_layer_str - 将链路层类型转为可读字符串
+ * link_layer_str - Convert link layer type to readable string
  */
 static const char *link_layer_str(uint8_t link_layer)
 {
     switch (link_layer) {
-    case IBV_LINK_LAYER_UNSPECIFIED:    return "UNSPECIFIED (未指定)";
+    case IBV_LINK_LAYER_UNSPECIFIED:    return "UNSPECIFIED (Unspecified)";
     case IBV_LINK_LAYER_INFINIBAND:     return "INFINIBAND (InfiniBand)";
-    case IBV_LINK_LAYER_ETHERNET:       return "ETHERNET (以太网/RoCE)";
-    default:                            return "UNKNOWN (未知)";
+    case IBV_LINK_LAYER_ETHERNET:       return "ETHERNET (Ethernet/RoCE)";
+    default:                            return "UNKNOWN (Unknown)";
     }
 }
 
 /**
- * width_str - 将链路宽度转为可读字符串
+ * width_str - Convert link width to readable string
  */
 static const char *width_str(uint8_t width)
 {
@@ -93,14 +93,14 @@ static const char *width_str(uint8_t width)
 }
 
 /**
- * speed_str - 将链路速度转为可读字符串
+ * speed_str - Convert link speed to readable string
  */
 static const char *speed_str(uint8_t speed)
 {
     switch (speed) {
     case 1:  return "2.5 Gbps (SDR)";
     case 2:  return "5.0 Gbps (DDR)";
-    case 4:  return "10.0 Gbps (QDR)";     /* 也可能是 10GbE */
+    case 4:  return "10.0 Gbps (QDR)";     /* Could also be 10GbE */
     case 8:  return "10.0 Gbps (FDR10)";
     case 16: return "14.0 Gbps (FDR)";
     case 32: return "25.0 Gbps (EDR)";
@@ -110,187 +110,187 @@ static const char *speed_str(uint8_t speed)
 }
 
 /**
- * print_port_attr - 打印 ibv_port_attr 结构体的所有字段
+ * print_port_attr - Print all fields of the ibv_port_attr structure
  *
- * 每个字段都附有中文注释，解释其用途
+ * Each field is accompanied by an English comment explaining its purpose
  */
 static void print_port_attr(const struct ibv_port_attr *attr, uint8_t port_num)
 {
-    printf("\n  --- 端口 %u 属性 ---\n", port_num);
+    printf("\n  --- Port %u Attributes ---\n", port_num);
 
-    /* 端口状态: 标识端口当前运行状态 (DOWN/INIT/ARMED/ACTIVE) */
+    /* Port state: Indicates current running state (DOWN/INIT/ARMED/ACTIVE) */
     printf("  %-20s = %d (%s)\n", "state",
            attr->state, port_state_str(attr->state));
 
-    /* 最大 MTU: 端口硬件支持的最大传输单元 */
-    printf("  %-20s = %d (%d 字节)\n", "max_mtu",
+    /* Max MTU: Maximum transmission unit supported by port hardware */
+    printf("  %-20s = %d (%d bytes)\n", "max_mtu",
            attr->max_mtu, mtu_to_bytes(attr->max_mtu));
 
-    /* 当前活动 MTU: 协商后的实际使用 MTU */
-    printf("  %-20s = %d (%d 字节)\n", "active_mtu",
+    /* Active MTU: Actual MTU in use after negotiation */
+    printf("  %-20s = %d (%d bytes)\n", "active_mtu",
            attr->active_mtu, mtu_to_bytes(attr->active_mtu));
 
-    /* GID 表长度: 该端口的 GID 条目数量 (RoCE 寻址用) */
+    /* GID table length: Number of GID entries for this port (used for RoCE addressing) */
     printf("  %-20s = %d\n", "gid_tbl_len",
            attr->gid_tbl_len);
 
-    /* 端口能力标志: 位掩码，指示端口支持的功能 */
+    /* Port capability flags: Bitmask indicating features supported by the port */
     printf("  %-20s = 0x%08x\n", "port_cap_flags",
            attr->port_cap_flags);
 
-    /* 最大消息大小: 单个消息允许的最大字节数 */
+    /* Max message size: Maximum bytes allowed in a single message */
     printf("  %-20s = %u\n", "max_msg_sz",
            attr->max_msg_sz);
 
-    /* 坏的 P_Key 计数: 收到无效 P_Key 的报文计数 (安全相关) */
+    /* Bad P_Key counter: Count of packets received with invalid P_Key (security related) */
     printf("  %-20s = %u\n", "bad_pkey_cntr",
            attr->bad_pkey_cntr);
 
-    /* Q_Key 违规计数: 收到错误 Q_Key 的 UD 报文计数 */
+    /* Q_Key violation counter: Count of UD packets received with wrong Q_Key */
     printf("  %-20s = %u\n", "qkey_viol_cntr",
            attr->qkey_viol_cntr);
 
-    /* P_Key 表长度: 分区密钥表的条目数 (多租户隔离用) */
+    /* P_Key table length: Number of entries in the partition key table (used for multi-tenant isolation) */
     printf("  %-20s = %u\n", "pkey_tbl_len",
            attr->pkey_tbl_len);
 
-    /* LID (Local Identifier): IB 子网内的本地标识符 (由 SM 分配) */
+    /* LID (Local Identifier): Local identifier within IB subnet (assigned by SM) */
     printf("  %-20s = %u (0x%04x)\n", "lid",
            attr->lid, attr->lid);
 
-    /* SM LID: Subnet Manager 的 LID */
+    /* SM LID: LID of the Subnet Manager */
     printf("  %-20s = %u (0x%04x)\n", "sm_lid",
            attr->sm_lid, attr->sm_lid);
 
-    /* LMC (LID Mask Control): 允许一个端口拥有 2^LMC 个连续 LID */
+    /* LMC (LID Mask Control): Allows a port to have 2^LMC consecutive LIDs */
     printf("  %-20s = %u\n", "lmc",
            attr->lmc);
 
-    /* 最大 VL 数: 支持的虚拟通道数量 (QoS 相关) */
+    /* Max VL count: Number of supported virtual lanes (QoS related) */
     printf("  %-20s = %u\n", "max_vl_num",
            attr->max_vl_num);
 
-    /* SM SL: 到达 Subnet Manager 使用的 Service Level */
+    /* SM SL: Service Level used to reach the Subnet Manager */
     printf("  %-20s = %u\n", "sm_sl",
            attr->sm_sl);
 
-    /* 子网超时: 子网管理相关的超时值 */
+    /* Subnet timeout: Timeout value related to subnet management */
     printf("  %-20s = %u\n", "subnet_timeout",
            attr->subnet_timeout);
 
-    /* 初始化类型回复: 端口初始化类型信息 */
+    /* Init type reply: Port initialization type information */
     printf("  %-20s = %u\n", "init_type_reply",
            attr->init_type_reply);
 
-    /* 活动宽度: 当前链路协商的宽度 (1X/4X/8X/12X) */
+    /* Active width: Currently negotiated link width (1X/4X/8X/12X) */
     printf("  %-20s = %u (%s)\n", "active_width",
            attr->active_width, width_str(attr->active_width));
 
-    /* 活动速度: 当前链路协商的速度 */
+    /* Active speed: Currently negotiated link speed */
     printf("  %-20s = %u (%s)\n", "active_speed",
            attr->active_speed, speed_str(attr->active_speed));
 
-    /* 物理状态: 物理链路状态 (Sleep/Polling/LinkUp 等) */
+    /* Physical state: Physical link state (Sleep/Polling/LinkUp etc.) */
     printf("  %-20s = %u\n", "phys_state",
            attr->phys_state);
 
-    /* 链路层类型: InfiniBand / Ethernet (RoCE) / Unspecified */
+    /* Link layer type: InfiniBand / Ethernet (RoCE) / Unspecified */
     printf("  %-20s = %u (%s)\n", "link_layer",
            attr->link_layer, link_layer_str(attr->link_layer));
 }
 
-/* ========== 主函数 ========== */
+/* ========== Main Function ========== */
 
 int main(int argc, char *argv[])
 {
-    struct ibv_device **dev_list = NULL;    /* 设备列表指针 */
-    int num_devices = 0;                    /* 设备数量 */
-    int ret = 0;                            /* 返回值 */
+    struct ibv_device **dev_list = NULL;    /* Device list pointer */
+    int num_devices = 0;                    /* Number of devices */
+    int ret = 0;                            /* Return value */
 
     printf("==============================================\n");
-    printf("  IB 端口属性完整查询工具\n");
-    printf("  使用 ibv_query_port() 显示所有字段\n");
+    printf("  IB Port Attribute Full Query Tool\n");
+    printf("  Display all fields using ibv_query_port()\n");
     printf("==============================================\n");
 
-    /* 第一步：获取所有 RDMA 设备列表 */
+    /* Step 1: Get list of all RDMA devices */
     dev_list = ibv_get_device_list(&num_devices);
     if (!dev_list) {
-        fprintf(stderr, "[错误] ibv_get_device_list() 失败: %s\n",
+        fprintf(stderr, "[Error] ibv_get_device_list() failed: %s\n",
                 strerror(errno));
         return 1;
     }
 
     if (num_devices == 0) {
-        fprintf(stderr, "[错误] 未找到任何 RDMA 设备\n");
-        fprintf(stderr, "  提示: 请确认 RDMA 驱动已加载\n");
+        fprintf(stderr, "[Error] No RDMA devices found\n");
+        fprintf(stderr, "  Hint: Please verify RDMA drivers are loaded\n");
         fprintf(stderr, "  - SoftRoCE: sudo rdma link add rxe_0 type rxe netdev eth0\n");
         fprintf(stderr, "  - IB: modprobe mlx5_ib\n");
         ret = 1;
         goto cleanup;
     }
 
-    printf("\n共发现 %d 个 RDMA 设备\n", num_devices);
+    printf("\nFound %d RDMA device(s)\n", num_devices);
 
-    /* 第二步：遍历每个设备 */
+    /* Step 2: Iterate over each device */
     for (int i = 0; i < num_devices; i++) {
-        struct ibv_device *dev = dev_list[i];           /* 当前设备 */
-        struct ibv_context *ctx = NULL;                 /* 设备上下文 */
-        struct ibv_device_attr dev_attr;                /* 设备属性 */
+        struct ibv_device *dev = dev_list[i];           /* Current device */
+        struct ibv_context *ctx = NULL;                 /* Device context */
+        struct ibv_device_attr dev_attr;                /* Device attributes */
 
-        printf("\n===== 设备 %d: %s =====\n", i, ibv_get_device_name(dev));
+        printf("\n===== Device %d: %s =====\n", i, ibv_get_device_name(dev));
 
-        /* 打开设备，获取上下文句柄 */
+        /* Open device, get context handle */
         ctx = ibv_open_device(dev);
         if (!ctx) {
-            fprintf(stderr, "[错误] 无法打开设备 %s: %s\n",
+            fprintf(stderr, "[Error] Cannot open device %s: %s\n",
                     ibv_get_device_name(dev), strerror(errno));
-            continue;   /* 跳过此设备，继续下一个 */
+            continue;   /* Skip this device, continue to next */
         }
 
-        /* 使用公共库的 detect_transport() 检测传输类型 */
+        /* Use common library's detect_transport() to detect transport type */
         enum rdma_transport transport = detect_transport(ctx, 1);
-        printf("  传输类型: %s\n", transport_str(transport));
+        printf("  Transport Type: %s\n", transport_str(transport));
 
-        /* 查询设备属性，获取端口数量 */
+        /* Query device attributes to get port count */
         memset(&dev_attr, 0, sizeof(dev_attr));
         ret = ibv_query_device(ctx, &dev_attr);
         if (ret) {
-            fprintf(stderr, "[错误] ibv_query_device() 失败: %s\n",
+            fprintf(stderr, "[Error] ibv_query_device() failed: %s\n",
                     strerror(errno));
             ibv_close_device(ctx);
             continue;
         }
 
-        printf("  设备端口数量: %d\n", dev_attr.phys_port_cnt);
+        printf("  Device port count: %d\n", dev_attr.phys_port_cnt);
 
-        /* 第三步：遍历每个端口，查询并打印属性 */
+        /* Step 3: Iterate over each port, query and print attributes */
         for (uint8_t port = 1; port <= dev_attr.phys_port_cnt; port++) {
-            struct ibv_port_attr port_attr;             /* 端口属性结构体 */
+            struct ibv_port_attr port_attr;             /* Port attribute structure */
 
             memset(&port_attr, 0, sizeof(port_attr));
 
-            /* 查询指定端口的属性 */
+            /* Query specified port attributes */
             ret = ibv_query_port(ctx, port, &port_attr);
             if (ret) {
-                fprintf(stderr, "[错误] ibv_query_port(port=%u) 失败: %s\n",
+                fprintf(stderr, "[Error] ibv_query_port(port=%u) failed: %s\n",
                         port, strerror(errno));
-                continue;   /* 跳过此端口 */
+                continue;   /* Skip this port */
             }
 
-            /* 打印该端口的所有属性字段 */
+            /* Print all attribute fields for this port */
             print_port_attr(&port_attr, port);
         }
 
-        /* 关闭设备 */
+        /* Close device */
         ibv_close_device(ctx);
     }
 
 cleanup:
-    /* 释放设备列表 */
+    /* Free device list */
     if (dev_list) {
         ibv_free_device_list(dev_list);
     }
 
-    printf("\n查询完成。\n");
+    printf("\nQuery complete.\n");
     return ret;
 }

@@ -1,4 +1,4 @@
-# RDMA 公共工具库
+# RDMA Common Utility Library
 
 CC = gcc
 CFLAGS = -Wall -O2 -g

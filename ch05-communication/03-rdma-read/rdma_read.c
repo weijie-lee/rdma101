@@ -1,12 +1,12 @@
 /**
- * RDMA Read 示例
- * 客户端从服务器拉取数据
+ * RDMA Read Example
+ * Client pulls data from server
  *
- * 支持 IB/RoCE 双模自动检测:
- *   - IB 模式: 使用 LID 寻址
- *   - RoCE 模式: 使用 GID 寻址 (ah_attr.is_global=1 + GRH)
+ * Supports IB/RoCE dual-mode auto-detection:
+ *   - IB mode: uses LID addressing
+ *   - RoCE mode: uses GID addressing (ah_attr.is_global=1 + GRH)
  *
- * 编译: gcc -Wall -O2 -g -o rdma_read rdma_read.c \
+ * Build: gcc -Wall -O2 -g -o rdma_read rdma_read.c \
  *        -I../../common -L../../common -lrdma_utils -libverbs
  */
 
@@ -21,11 +21,11 @@
 
 #define BUFFER_SIZE 4096
 
-/* 交换的数据结构 (扩展支持 GID) */
+/* Data structure for exchange (extended to support GID) */
 struct connection_info {
     uint32_t qp_num;
     uint16_t lid;
-    union ibv_gid gid;   /* GID (RoCE 模式) */
+    union ibv_gid gid;   /* GID (RoCE mode) */
     uint64_t buf_addr;
     uint32_t buf_rkey;
 };
@@ -38,8 +38,8 @@ struct rdma_ctx {
     struct ibv_mr *mr;
     char *send_buf;
     char *recv_buf;
-    int is_roce;        /* IB/RoCE 自动检测 */
-    union ibv_gid gid;  /* 本地 GID */
+    int is_roce;        /* IB/RoCE auto-detection */
+    union ibv_gid gid;  /* Local GID */
 };
 
 int init_ctx(struct rdma_ctx *ctx)
@@ -54,12 +54,12 @@ int init_ctx(struct rdma_ctx *ctx)
     ctx->pd = ibv_alloc_pd(ctx->ctx);
     ctx->cq = ibv_create_cq(ctx->ctx, 256, NULL, NULL, 0);
 
-    /* 检测传输层类型: IB 还是 RoCE */
+    /* Detect transport layer type: IB or RoCE */
     enum rdma_transport transport = detect_transport(ctx->ctx, 1);
     ctx->is_roce = (transport == RDMA_TRANSPORT_ROCE);
-    printf("传输层类型: %s\n", transport_str(transport));
+    printf("Transport layer type: %s\n", transport_str(transport));
 
-    /* RoCE 模式下查询 GID */
+    /* Query GID in RoCE mode */
     if (ctx->is_roce) {
         ibv_query_gid(ctx->ctx, 1, RDMA_DEFAULT_GID_INDEX, &ctx->gid);
     }
@@ -103,7 +103,7 @@ int qp_connect(struct rdma_ctx *ctx, uint32_t remote_qp, uint16_t remote_lid,
         return -1;
     }
 
-    /* RTR - 支持 IB/RoCE 双模 */
+    /* RTR - supports IB/RoCE dual mode */
     memset(&attr, 0, sizeof(attr));
     attr.qp_state = IBV_QPS_RTR;
     attr.path_mtu = IBV_MTU_256;
@@ -115,14 +115,14 @@ int qp_connect(struct rdma_ctx *ctx, uint32_t remote_qp, uint16_t remote_lid,
     attr.ah_attr.port_num = 1;
 
     if (ctx->is_roce) {
-        /* RoCE 模式: 使用 GID 寻址 */
+        /* RoCE mode: use GID addressing */
         attr.ah_attr.is_global = 1;
         attr.ah_attr.grh.dgid = *remote_gid;
         attr.ah_attr.grh.sgid_index = RDMA_DEFAULT_GID_INDEX;
         attr.ah_attr.grh.hop_limit = 64;
         attr.ah_attr.dlid = 0;
     } else {
-        /* IB 模式: 使用 LID 寻址 */
+        /* IB mode: use LID addressing */
         attr.ah_attr.is_global = 0;
         attr.ah_attr.dlid = remote_lid;
     }
@@ -155,12 +155,12 @@ int qp_connect(struct rdma_ctx *ctx, uint32_t remote_qp, uint16_t remote_lid,
     return 0;
 }
 
-/* 执行RDMA Read */
+/* Perform RDMA Read */
 int rdma_read(struct rdma_ctx *ctx, uint64_t remote_addr, uint32_t remote_rkey)
 {
     /*
-     * RDMA Read：本端发起，将远端 remote_addr 处的数据拉取到本地 recv_buf。
-     * recv_buf 已在 init_ctx() 中注册了 MR，lkey = ctx->mr->lkey。
+     * RDMA Read: initiated locally, pulls data from remote_addr into local recv_buf.
+     * recv_buf was registered as MR in init_ctx(), lkey = ctx->mr->lkey.
      */
     struct ibv_sge sge = {
         .addr = (uint64_t)ctx->recv_buf,
@@ -182,7 +182,7 @@ int rdma_read(struct rdma_ctx *ctx, uint64_t remote_addr, uint32_t remote_rkey)
         return -1;
     }
 
-    /* 等待完成 */
+    /* Wait for completion */
     struct ibv_wc wc;
     while (ibv_poll_cq(ctx->cq, 1, &wc) == 0);
 
@@ -193,7 +193,7 @@ int rdma_read(struct rdma_ctx *ctx, uint64_t remote_addr, uint32_t remote_rkey)
     return 0;
 }
 
-/* 通过socket交换连接信息 (含 GID) */
+/* Exchange connection info via socket (including GID) */
 void exchange_connection(struct rdma_ctx *ctx, const char *server_ip,
                         struct connection_info *local, struct connection_info *remote)
 {
@@ -275,7 +275,7 @@ int main(int argc, char *argv[])
     printf("QP ready (RESET->INIT->RTR->RTS)\n");
 
     if (is_server) {
-        /* Server: 填充数据供 Client 读取 */
+        /* Server: fill data for Client to read */
         printf("Server: filling data...\n");
         snprintf(ctx.recv_buf, BUFFER_SIZE, "Hello from server! Time: %ld", (long)time(NULL));
 
@@ -285,12 +285,12 @@ int main(int argc, char *argv[])
         sleep(10);
         printf("Server: done.\n");
     } else {
-        /* Client: 执行 RDMA Read，数据被拉取到本地 recv_buf */
+        /* Client: perform RDMA Read, data is pulled into local recv_buf */
         printf("Client: reading from server...\n");
         printf("Remote: addr=%lu, rkey=0x%x\n",
                (unsigned long)remote_info.buf_addr, remote_info.buf_rkey);
 
-        sleep(1);  /* 等待 Server 准备好数据 */
+        sleep(1);  /* Wait for Server to prepare data */
 
         if (rdma_read(&ctx, remote_info.buf_addr, remote_info.buf_rkey) == 0) {
             printf("Client: read data = \"%s\"\n", ctx.recv_buf);
@@ -299,7 +299,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    /* 清理资源 */
+    /* Cleanup resources */
     if (ctx.mr) ibv_dereg_mr(ctx.mr);
     if (ctx.send_buf) free(ctx.send_buf);
     if (ctx.recv_buf) free(ctx.recv_buf);

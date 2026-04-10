@@ -1,55 +1,56 @@
-# 第二章：网络层 —— InfiniBand / RoCE / iWARP
+# Chapter 2: Network Layer — InfiniBand / RoCE / iWARP
 
-## 学习目标
+## Learning Objectives
 
-- 深入理解三种 RDMA 传输层协议的技术细节
-- 掌握 IB / RoCE / iWARP 的寻址差异（LID vs GID）
-- 学会使用 Verbs API 检测和查询底层传输类型
-- 理解 Verbs 如何在统一抽象层下支持所有传输协议
+- Deeply understand the technical details of three RDMA transport layer protocols
+- Master the addressing differences of IB / RoCE / iWARP (LID vs GID)
+- Learn to use Verbs API to detect and query the underlying transport type
+- Understand how Verbs supports all transport protocols under a unified abstraction layer
 
 ---
 
-## 2.1 为什么需要了解网络层？
+## 2.1 Why Understand the Network Layer?
 
-在第一章中，我们介绍了三种 RDMA 协议：InfiniBand、RoCE 和 iWARP。
-虽然 Verbs API 提供了统一的编程接口，但在实际编程中，**传输层的差异仍会影响你的代码**。
+In Chapter 1, we introduced three RDMA protocols: InfiniBand, RoCE, and iWARP.
+Although the Verbs API provides a unified programming interface, in actual programming, **transport layer differences still affect your code**.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    你的 RDMA 应用程序                            │
+│                    Your RDMA Application                         │
 ├─────────────────────────────────────────────────────────────────┤
 │                    libibverbs (Verbs API)                       │
-│                    ← 统一抽象层 →                                │
+│                    ← Unified Abstraction Layer →                 │
 ├───────────────┬───────────────┬─────────────────────────────────┤
 │  InfiniBand   │    RoCE v2    │           iWARP                 │
-│  (LID 寻址)   │  (GID 寻址)   │        (TCP 流)                 │
+│  (LID Addr)   │  (GID Addr)   │        (TCP Stream)             │
 ├───────────────┼───────────────┼─────────────────────────────────┤
-│  IB 专用网络   │   以太网       │          TCP/IP                 │
+│  IB Dedicated  │   Ethernet    │          TCP/IP                 │
+│  Network       │               │                                 │
 └───────────────┴───────────────┴─────────────────────────────────┘
 ```
 
-### 关键差异
+### Key Differences
 
-| 差异点 | InfiniBand | RoCE v1/v2 | iWARP |
+| Difference | InfiniBand | RoCE v1/v2 | iWARP |
 |--------|------------|------------|-------|
 | **link_layer** | `IBV_LINK_LAYER_INFINIBAND` | `IBV_LINK_LAYER_ETHERNET` | `IBV_LINK_LAYER_ETHERNET` |
 | **node_type** | `IBV_NODE_CA` | `IBV_NODE_CA` | `IBV_NODE_RNIC` |
-| **寻址方式** | LID (16-bit 本地 ID) | GID (128-bit 全局 ID) | IP 地址 |
-| **ah_attr** | `dlid` 字段 | `is_global=1` + `grh.dgid` | 通常用 RDMA CM |
-| **子网管理** | 需要 SM (Subnet Manager) | 不需要 | 不需要 |
-| **底层网络** | IB 专用交换机 | 标准以太网交换机 | 标准 TCP/IP 网络 |
-| **传输层** | IB 原生传输 | UDP (端口 4791) | TCP |
+| **Addressing** | LID (16-bit Local ID) | GID (128-bit Global ID) | IP Address |
+| **ah_attr** | `dlid` field | `is_global=1` + `grh.dgid` | Typically uses RDMA CM |
+| **Subnet Management** | Requires SM (Subnet Manager) | Not required | Not required |
+| **Underlying Network** | IB Dedicated Switches | Standard Ethernet Switches | Standard TCP/IP Network |
+| **Transport Layer** | IB Native Transport | UDP (Port 4791) | TCP |
 
 ---
 
-## 2.2 InfiniBand 详解
+## 2.2 InfiniBand In-Depth
 
-### 2.2.1 IB 网络架构
+### 2.2.1 IB Network Architecture
 
 ```
 ┌──────────┐    IB Link    ┌──────────┐    IB Link    ┌──────────┐
 │  HCA      │◀────────────▶│  IB       │◀────────────▶│  HCA      │
-│  (网卡)    │              │  Switch   │              │  (网卡)    │
+│  (NIC)     │              │  Switch   │              │  (NIC)     │
 │  LID=1    │              │           │              │  LID=2    │
 └──────────┘              └──────────┘              └──────────┘
                                 │
@@ -60,130 +61,130 @@
                           └───────────┘
 ```
 
-### 2.2.2 LID 寻址
+### 2.2.2 LID Addressing
 
-IB 使用 16-bit 的 **LID (Local Identifier)** 进行子网内寻址：
+IB uses a 16-bit **LID (Local Identifier)** for intra-subnet addressing:
 
-- LID 由 **Subnet Manager (SM)** 分配
-- 每个端口至少分配一个 LID
-- LID 范围：1 ~ 65535 (0 保留)
-- 跨子网通信需要 GRH (Global Route Header)
+- LID is assigned by the **Subnet Manager (SM)**
+- Each port is assigned at least one LID
+- LID range: 1 ~ 65535 (0 is reserved)
+- Cross-subnet communication requires GRH (Global Route Header)
 
 ```c
-/* IB 模式的 ah_attr 设置 */
+/* ah_attr setup for IB mode */
 struct ibv_ah_attr ah_attr = {
-    .dlid       = remote->lid,      /* 目的端口的 LID */
+    .dlid       = remote->lid,      /* Destination port LID */
     .sl         = 0,                /* Service Level */
     .port_num   = port,
-    .is_global  = 0,                /* IB 子网内不需要 GRH */
+    .is_global  = 0,                /* GRH not needed within IB subnet */
 };
 ```
 
-### 2.2.3 端口属性
+### 2.2.3 Port Attributes
 
-IB 端口提供丰富的属性信息：
+IB ports provide rich attribute information:
 
-| 字段 | 说明 |
+| Field | Description |
 |------|------|
-| `state` | 端口状态：DOWN / INIT / ARMED / ACTIVE |
-| `lid` | 本地端口 LID |
-| `sm_lid` | Subnet Manager 的 LID |
-| `active_mtu` | 活动 MTU (256/512/1024/2048/4096) |
-| `active_speed` | 链路速率 |
-| `active_width` | 链路宽度 (1x/4x/8x/12x) |
-| `link_layer` | 链路层类型 |
-| `gid_tbl_len` | GID 表长度 |
-| `pkey_tbl_len` | P_Key 表长度 |
+| `state` | Port state: DOWN / INIT / ARMED / ACTIVE |
+| `lid` | Local port LID |
+| `sm_lid` | Subnet Manager LID |
+| `active_mtu` | Active MTU (256/512/1024/2048/4096) |
+| `active_speed` | Link speed |
+| `active_width` | Link width (1x/4x/8x/12x) |
+| `link_layer` | Link layer type |
+| `gid_tbl_len` | GID table length |
+| `pkey_tbl_len` | P_Key table length |
 
-### 2.2.4 实践文件
+### 2.2.4 Practice Files
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `01-infiniband/ib_env_check.sh` | IB 环境检查脚本 |
-| `01-infiniband/ib_port_detail.c` | IB 端口属性完整查询程序 |
+| `01-infiniband/ib_env_check.sh` | IB environment check script |
+| `01-infiniband/ib_port_detail.c` | IB port attribute full query program |
 
 ---
 
-## 2.3 RoCE 详解
+## 2.3 RoCE In-Depth
 
-### 2.3.1 RoCE 协议栈
+### 2.3.1 RoCE Protocol Stack
 
 ```
 RoCE v1:                           RoCE v2:
 ┌─────────────┐                    ┌─────────────┐
-│  IB 传输层    │                    │  IB 传输层    │
+│  IB Transport │                    │  IB Transport │
 ├─────────────┤                    ├─────────────┤
-│  IB 网络层    │                    │  UDP:4791   │
+│  IB Network   │                    │  UDP:4791   │
 ├─────────────┤                    ├─────────────┤
-│  以太网       │                    │  IP (v4/v6) │
+│  Ethernet     │                    │  IP (v4/v6) │
 └─────────────┘                    ├─────────────┤
-                                   │  以太网       │
+                                   │  Ethernet     │
                                    └─────────────┘
 ```
 
-**RoCE v2 是目前主流**，因为它支持 IP 路由，可以跨三层网络。
+**RoCE v2 is the current mainstream**, because it supports IP routing and can traverse Layer 3 networks.
 
-### 2.3.2 GID 寻址
+### 2.3.2 GID Addressing
 
-RoCE 不使用 LID，而是使用 **128-bit GID (Global Identifier)**：
+RoCE does not use LID; instead, it uses **128-bit GID (Global Identifier)**:
 
-- GID 格式与 IPv6 地址相同
-- RoCE v2 的 GID 通常基于 IPv4-mapped IPv6 或真实 IPv6
-- 每个端口有一个 **GID 表**，包含多个 GID 条目
+- GID format is the same as IPv6 addresses
+- RoCE v2 GIDs are typically based on IPv4-mapped IPv6 or real IPv6
+- Each port has a **GID table** containing multiple GID entries
 
 ```
-GID 表示例:
+GID Table Example:
   Index 0: fe80::xxxx:xxxx:xxxx:xxxx    (link-local, RoCE v1)
   Index 1: ::ffff:10.0.0.1              (IPv4-mapped, RoCE v2)
   Index 2: fe80::xxxx:xxxx:xxxx:xxxx    (link-local, RoCE v1)
   Index 3: ::ffff:10.0.0.1              (IPv4-mapped, RoCE v2)
 ```
 
-**GID 索引选择规则：**
-- RoCE v1: 使用 `gid_index = 0` (link-local GID)
-- RoCE v2: 通常使用 `gid_index = 1` 或 `gid_index = 3` (IPv4-mapped GID)
+**GID Index Selection Rules:**
+- RoCE v1: Use `gid_index = 0` (link-local GID)
+- RoCE v2: Typically use `gid_index = 1` or `gid_index = 3` (IPv4-mapped GID)
 
 ```c
-/* RoCE 模式的 ah_attr 设置 */
+/* ah_attr setup for RoCE mode */
 struct ibv_ah_attr ah_attr = {
-    .dlid       = 0,                /* RoCE 不使用 LID */
+    .dlid       = 0,                /* RoCE does not use LID */
     .port_num   = port,
-    .is_global  = 1,                /* 必须开启 GRH */
+    .is_global  = 1,                /* GRH must be enabled */
     .grh = {
-        .dgid       = remote->gid,  /* 目的端口的 GID */
-        .sgid_index = gid_index,     /* 本地 GID 表索引 */
+        .dgid       = remote->gid,  /* Destination port GID */
+        .sgid_index = gid_index,     /* Local GID table index */
         .hop_limit  = 64,
         .traffic_class = 0,
     },
 };
 ```
 
-### 2.3.3 RoCE 网络要求
+### 2.3.3 RoCE Network Requirements
 
-RoCE 对网络质量有要求，因为 UDP 不像 TCP 那样重传：
+RoCE has network quality requirements, because UDP does not retransmit like TCP:
 
-| 机制 | 说明 |
+| Mechanism | Description |
 |------|------|
-| **PFC (Priority Flow Control)** | 基于优先级的流控，防止丢包 |
-| **ECN (Explicit Congestion Notification)** | 显式拥塞通知，防止队列溢出 |
-| **DSCP** | 差分服务代码点，QoS 标记 |
+| **PFC (Priority Flow Control)** | Priority-based flow control to prevent packet loss |
+| **ECN (Explicit Congestion Notification)** | Explicit congestion notification to prevent queue overflow |
+| **DSCP** | Differentiated Services Code Point, QoS marking |
 
-### 2.3.4 实践文件
+### 2.3.4 Practice Files
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `02-roce/roce_env_check.sh` | RoCE 环境检查脚本 |
-| `02-roce/roce_gid_query.c` | GID 表枚举与分析程序 |
+| `02-roce/roce_env_check.sh` | RoCE environment check script |
+| `02-roce/roce_gid_query.c` | GID table enumeration and analysis program |
 
 ---
 
-## 2.4 iWARP 详解
+## 2.4 iWARP In-Depth
 
-### 2.4.1 iWARP 协议栈
+### 2.4.1 iWARP Protocol Stack
 
 ```
 ┌─────────────┐
-│  RDMA 层     │  (RDMAP - Remote Direct Memory Access Protocol)
+│  RDMA Layer   │  (RDMAP - Remote Direct Memory Access Protocol)
 ├─────────────┤
 │  DDP         │  (Direct Data Placement)
 ├─────────────┤
@@ -193,87 +194,87 @@ RoCE 对网络质量有要求，因为 UDP 不像 TCP 那样重传：
 ├─────────────┤
 │  IP          │
 ├─────────────┤
-│  以太网       │
+│  Ethernet     │
 └─────────────┘
 ```
 
-### 2.4.2 iWARP 特点
+### 2.4.2 iWARP Characteristics
 
-- **基于 TCP**：天然支持路由、NAT、防火墙穿越
-- **无需无损网络**：TCP 自带重传机制
-- **性能略低**：TCP 处理开销 > UDP
-- **node_type**：`IBV_NODE_RNIC` (区别于 IB/RoCE 的 `IBV_NODE_CA`)
+- **TCP-based**: Natively supports routing, NAT, and firewall traversal
+- **No lossless network required**: TCP has built-in retransmission
+- **Slightly lower performance**: TCP processing overhead > UDP
+- **node_type**: `IBV_NODE_RNIC` (different from IB/RoCE's `IBV_NODE_CA`)
 
-### 2.4.3 iWARP 常见硬件
+### 2.4.3 Common iWARP Hardware
 
-| 厂商 | 系列 | 驱动 |
+| Vendor | Series | Driver |
 |------|------|------|
 | Chelsio | T5/T6 | `iw_cxgb4` |
 | Intel | X722/E810 | `i40iw` / `irdma` |
 
-### 2.4.4 iWARP 编程注意
+### 2.4.4 iWARP Programming Notes
 
-iWARP 通常使用 **RDMA CM** 建立连接（因为底层是 TCP）：
+iWARP typically uses **RDMA CM** to establish connections (because the underlying layer is TCP):
 
 ```c
-/* iWARP 的典型连接方式 */
-rdma_create_id()     /* 创建 CM ID */
-rdma_resolve_addr()  /* 解析地址 */
-rdma_resolve_route() /* 解析路由 */
-rdma_connect()       /* 建立连接 (底层是 TCP handshake) */
+/* Typical connection method for iWARP */
+rdma_create_id()     /* Create CM ID */
+rdma_resolve_addr()  /* Resolve address */
+rdma_resolve_route() /* Resolve route */
+rdma_connect()       /* Establish connection (underlying TCP handshake) */
 ```
 
-### 2.4.5 实践文件
+### 2.4.5 Practice Files
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `03-iwarp/iwarp_env_check.sh` | iWARP 环境检查脚本 |
-| `03-iwarp/iwarp_query.c` | iWARP 设备查询程序 |
+| `03-iwarp/iwarp_env_check.sh` | iWARP environment check script |
+| `03-iwarp/iwarp_query.c` | iWARP device query program |
 
 ---
 
-## 2.5 Verbs 统一抽象
+## 2.5 Verbs Unified Abstraction
 
-### 2.5.1 一套代码，三种传输
+### 2.5.1 One Codebase, Three Transports
 
-Verbs API 的设计哲学是：**应用层代码尽量不感知底层传输类型**。
+The Verbs API design philosophy is: **application-layer code should be as transport-agnostic as possible**.
 
 ```c
-/* 这段代码在 IB / RoCE / iWARP 上都能运行 */
-dev_list = ibv_get_device_list(&num_devices);   /* 枚举所有设备 */
-ctx = ibv_open_device(dev_list[0]);             /* 打开设备 */
-ibv_query_device(ctx, &dev_attr);               /* 查询设备能力 */
-ibv_query_port(ctx, 1, &port_attr);             /* 查询端口属性 */
+/* This code works on IB / RoCE / iWARP */
+dev_list = ibv_get_device_list(&num_devices);   /* Enumerate all devices */
+ctx = ibv_open_device(dev_list[0]);             /* Open device */
+ibv_query_device(ctx, &dev_attr);               /* Query device capabilities */
+ibv_query_port(ctx, 1, &port_attr);             /* Query port attributes */
 
-/* 仅在设置 ah_attr 时需要区分传输类型 */
+/* Only need to differentiate transport type when setting ah_attr */
 if (port_attr.link_layer == IBV_LINK_LAYER_ETHERNET) {
-    /* RoCE: 使用 GID 寻址 */
+    /* RoCE: Use GID addressing */
     ah_attr.is_global = 1;
     ah_attr.grh.dgid = remote_gid;
 } else {
-    /* IB: 使用 LID 寻址 */
+    /* IB: Use LID addressing */
     ah_attr.dlid = remote_lid;
 }
 ```
 
-### 2.5.2 传输类型检测方法
+### 2.5.2 Transport Type Detection Methods
 
 ```c
-/* 方法 1: 通过 link_layer 判断 */
+/* Method 1: Detect via link_layer */
 struct ibv_port_attr port_attr;
 ibv_query_port(ctx, port, &port_attr);
 if (port_attr.link_layer == IBV_LINK_LAYER_ETHERNET)
-    /* RoCE 或 iWARP */
+    /* RoCE or iWARP */
 if (port_attr.link_layer == IBV_LINK_LAYER_INFINIBAND)
     /* InfiniBand */
 
-/* 方法 2: 通过 node_type 判断 */
+/* Method 2: Detect via node_type */
 if (dev->node_type == IBV_NODE_CA)
-    /* IB 或 RoCE (Channel Adapter) */
+    /* IB or RoCE (Channel Adapter) */
 if (dev->node_type == IBV_NODE_RNIC)
     /* iWARP (RDMA NIC) */
 
-/* 方法 3: 结合两者 */
+/* Method 3: Combine both */
 enum rdma_transport detect_transport(ctx, port) {
     if (node_type == IBV_NODE_RNIC)  return IWARP;
     if (link_layer == ETHERNET)       return ROCE;
@@ -281,94 +282,94 @@ enum rdma_transport detect_transport(ctx, port) {
 }
 ```
 
-### 2.5.3 /dev/infiniband/ 设备文件
+### 2.5.3 /dev/infiniband/ Device Files
 
 ```bash
 $ ls /dev/infiniband/
-rdma_cm        # RDMA CM 字符设备
-uverbs0        # 第一个 RDMA 设备的 Verbs 字符设备
-uverbs1        # 第二个 RDMA 设备 (如有)
+rdma_cm        # RDMA CM character device
+uverbs0        # Verbs character device for the first RDMA device
+uverbs1        # Second RDMA device (if available)
 
 $ ls /sys/class/infiniband/
-rxe_0          # SoftRoCE 设备
-mlx5_0         # Mellanox CX-5 设备
+rxe_0          # SoftRoCE device
+mlx5_0         # Mellanox CX-5 device
 ```
 
-### 2.5.4 实践文件
+### 2.5.4 Practice Files
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `04-verbs-abstraction/verbs_any_transport.c` | 统一抽象演示程序 |
+| `04-verbs-abstraction/verbs_any_transport.c` | Unified abstraction demo program |
 
 ---
 
-## 2.6 SoftRoCE 环境下的实践
+## 2.6 Practice in SoftRoCE Environment
 
-如果你使用的是阿里云 ECS + SoftRoCE 环境（如 ch00 中搭建），那么：
+If you are using an Alibaba Cloud ECS + SoftRoCE environment (as set up in ch00), then:
 
 ```
-设备名:      rxe_0
-node_type:   IBV_NODE_CA        (与物理 RoCE 相同)
-link_layer:  IBV_LINK_LAYER_ETHERNET
-transport:   RDMA_TRANSPORT_ROCE
+Device Name:  rxe_0
+node_type:    IBV_NODE_CA        (same as physical RoCE)
+link_layer:   IBV_LINK_LAYER_ETHERNET
+transport:    RDMA_TRANSPORT_ROCE
 
-GID 表:
+GID Table:
   Index 0: fe80::xxxx:xxxx:xxxx:xxxx    (link-local)
-  Index 1: ::ffff:x.x.x.x              (IPv4-mapped, RoCE v2 用这个)
+  Index 1: ::ffff:x.x.x.x              (IPv4-mapped, use this for RoCE v2)
 ```
 
-**推荐的 GID 索引：**
-- SoftRoCE: `gid_index = 1`（对应 IPv4 地址）
-- 物理 RoCE: 查看 GID 表选择 RoCE v2 对应的索引
+**Recommended GID Index:**
+- SoftRoCE: `gid_index = 1` (corresponds to IPv4 address)
+- Physical RoCE: Check the GID table and select the index corresponding to RoCE v2
 
 ---
 
-## 本章文件结构
+## Chapter File Structure
 
 ```
 ch02-network-layer/
-├── README.md                              ← 本文件
+├── README.md                              ← This file
 ├── 01-infiniband/
-│   ├── ib_env_check.sh                    ← IB 环境检查脚本
-│   ├── ib_port_detail.c                   ← IB 端口详细查询
+│   ├── ib_env_check.sh                    ← IB environment check script
+│   ├── ib_port_detail.c                   ← IB port detailed query
 │   └── Makefile
 ├── 02-roce/
-│   ├── roce_env_check.sh                  ← RoCE 环境检查脚本
-│   ├── roce_gid_query.c                   ← GID 表枚举分析
+│   ├── roce_env_check.sh                  ← RoCE environment check script
+│   ├── roce_gid_query.c                   ← GID table enumeration analysis
 │   └── Makefile
 ├── 03-iwarp/
-│   ├── iwarp_env_check.sh                 ← iWARP 环境检查脚本
-│   ├── iwarp_query.c                      ← iWARP 设备查询
+│   ├── iwarp_env_check.sh                 ← iWARP environment check script
+│   ├── iwarp_query.c                      ← iWARP device query
 │   └── Makefile
 └── 04-verbs-abstraction/
-    ├── verbs_any_transport.c              ← 统一抽象演示
+    ├── verbs_any_transport.c              ← Unified abstraction demo
     └── Makefile
 ```
 
 ---
 
-## 学习顺序建议
+## Recommended Learning Order
 
-1. **阅读本 README**：理解三种协议的差异
-2. **运行环境检查脚本**：确认你的环境类型
-3. **编译并运行 C 程序**：动手实践各种查询
-4. **重点关注 02-roce/**：大部分云环境使用 RoCE
-5. **理解 04-verbs-abstraction/**：掌握统一编程模型
-
----
-
-## 练习题
-
-1. InfiniBand 使用什么寻址方式？由谁分配地址？
-2. RoCE v2 相比 v1 的最大改进是什么？
-3. 在 RoCE 环境中，`ah_attr.is_global` 必须设为几？为什么？
-4. 如何通过 Verbs API 区分 IB 和 RoCE 设备？
-5. iWARP 的 `node_type` 是什么？与 IB/RoCE 有何不同？
-6. 为什么 RoCE 需要 PFC 而 iWARP 不需要？
-7. 在 SoftRoCE 环境下，应该选择哪个 GID 索引？
+1. **Read this README**: Understand the differences between three protocols
+2. **Run environment check scripts**: Confirm your environment type
+3. **Compile and run C programs**: Hands-on practice with various queries
+4. **Focus on 02-roce/**: Most cloud environments use RoCE
+5. **Understand 04-verbs-abstraction/**: Master the unified programming model
 
 ---
 
-## 下一步
+## Exercises
 
-进入下一章：[第三章：Verbs API 入门](../ch03-verbs-api/README.md)
+1. What addressing method does InfiniBand use? Who assigns the addresses?
+2. What is the biggest improvement of RoCE v2 over v1?
+3. In a RoCE environment, what value must `ah_attr.is_global` be set to? Why?
+4. How can you distinguish IB and RoCE devices using the Verbs API?
+5. What is iWARP's `node_type`? How does it differ from IB/RoCE?
+6. Why does RoCE need PFC while iWARP does not?
+7. In a SoftRoCE environment, which GID index should you choose?
+
+---
+
+## Next Step
+
+Proceed to the next chapter: [Chapter 3: Verbs API Getting Started](../ch03-verbs-api/README.md)

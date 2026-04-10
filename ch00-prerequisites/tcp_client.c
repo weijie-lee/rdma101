@@ -1,6 +1,6 @@
 /**
- * TCP Client 示例
- * 演示基本的socket编程
+ * TCP Client Example
+ * Demonstrates basic socket programming
  */
 
 #include <stdio.h>
@@ -28,7 +28,7 @@ int main(int argc, char *argv[])
     printf("TCP Client Example\n");
     printf("==================\n\n");
     
-    // 1. 创建socket
+    // 1. Create socket
     sock_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (sock_fd < 0) {
         perror("socket failed");
@@ -36,31 +36,31 @@ int main(int argc, char *argv[])
     }
     printf("[1] Socket created: fd=%d\n", sock_fd);
     
-    // 2. 设置服务器地址
+    // 2. Set server address
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port);
     
-    // 转换IP地址
+    // Convert IP address
     if (inet_pton(AF_INET, server_ip, &server_addr.sin_addr) <= 0) {
         perror("Invalid address");
         return 1;
     }
     printf("[2] Server address set: %s:%d\n", server_ip, port);
     
-    // 3. 连接服务器
+    // 3. Connect to server
     if (connect(sock_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
         perror("connect failed");
         return 1;
     }
     printf("[3] Connected to server\n");
     
-    // 4. 发送数据
+    // 4. Send data
     const char *message = "Hello from client!";
     write(sock_fd, message, strlen(message));
     printf("[4] Sent: %s\n", message);
     
-    // 5. 接收回复
+    // 5. Receive reply
     memset(buffer, 0, BUFFER_SIZE);
     ssize_t n = read(sock_fd, buffer, BUFFER_SIZE - 1);
     
@@ -68,7 +68,7 @@ int main(int argc, char *argv[])
         printf("[5] Received (%zd bytes): %s\n", n, buffer);
     }
     
-    // 6. 关闭socket
+    // 6. Close socket
     close(sock_fd);
     printf("[6] Connection closed\n");
     

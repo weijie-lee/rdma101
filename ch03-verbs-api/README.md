@@ -1,33 +1,33 @@
-# 第三章：Verbs API 入门
+# Chapter 3: Getting Started with Verbs API
 
-## 学习目标
+## Learning Objectives
 
-| 目标 | 说明 |
-|------|------|
-| 掌握RDMA编程基本流程 | 理解设备发现→资源创建→通信→销毁的完整流程 |
-| 学会初始化硬件设备 | 掌握ibv_get_device_list、ibv_open_device |
-| 理解资源创建与销毁 | 掌握PD、CQ、QP、MR的创建和销毁 |
-| 能看懂简单的RDMA程序 | 理解示例代码的每个部分 |
+| Objective | Description |
+|-----------|-------------|
+| Master the basic RDMA programming flow | Understand the complete flow: device discovery -> resource creation -> communication -> destruction |
+| Learn to initialize hardware devices | Master ibv_get_device_list, ibv_open_device |
+| Understand resource creation and destruction | Master creation and destruction of PD, CQ, QP, MR |
+| Be able to read simple RDMA programs | Understand each part of the example code |
 
 ---
 
-## 2.1 Verbs API概述
+## 2.1 Verbs API Overview
 
-### 什么是libibverbs？
+### What is libibverbs?
 
-**libibverbs** 是Linux下RDMA编程的底层API，提供与硬件无关的编程接口。
+**libibverbs** is the low-level API for RDMA programming on Linux, providing a hardware-independent programming interface.
 
 ```
 ┌─────────────────────────────────────────────┐
-│           Application (你的程序)              │
+│           Application (Your Program)         │
 └─────────────────────────────────────────────┘
                      │
                      ▼
 ┌─────────────────────────────────────────────┐
 │           libibverbs (Verbs API)            │
-│   - 设备管理 (ibv_*)                        │
-│   - 内存管理 (ibv_*)                        │
-│   - 通信操作 (ibv_post_*)                   │
+│   - Device Management (ibv_*)               │
+│   - Memory Management (ibv_*)               │
+│   - Communication Operations (ibv_post_*)   │
 └─────────────────────────────────────────────┘
                      │
                      ▼
@@ -38,40 +38,40 @@
 └─────────────────────────────────────────────┘
 ```
 
-### 核心头文件
+### Core Header Files
 ```c
 #include <infiniband/verbs.h>    // Verbs API
-#include <rdma/rdma_cma.h>      // RDMA CM (高级API)
+#include <rdma/rdma_cma.h>      // RDMA CM (High-level API)
 ```
 
 ---
 
-## 2.2 设备发现与初始化
+## 2.2 Device Discovery and Initialization
 
-### 完整流程
+### Complete Flow
 
 ```c
-// 1. 获取设备列表
+// 1. Get device list
 struct ibv_device **device_list;
 int num_devices;
 device_list = ibv_get_device_list(&num_devices);
 
-// 2. 选择设备
+// 2. Select device
 struct ibv_device *device = device_list[0];
 
-// 3. 打开设备
+// 3. Open device
 struct ibv_context *context;
 context = ibv_open_device(device);
 
-// 4. 查询设备信息
+// 4. Query device information
 struct ibv_device_attr attr;
 ibv_query_device(context, &attr);
 ```
 
-### 代码详解
+### Code Walkthrough
 
 ```c
-// 获取所有RDMA设备
+// Get all RDMA devices
 device_list = ibv_get_device_list(&num_devices);
 if (!device_list) {
     perror("Failed to get device list");
@@ -79,7 +79,7 @@ if (!device_list) {
 }
 printf("Found %d RDMA devices\n", num_devices);
 
-// 打印设备名称
+// Print device names
 for (int i = 0; i < num_devices; i++) {
     printf("  %d: %s\n", i, ibv_get_device_name(device_list[i]));
 }
@@ -87,27 +87,27 @@ for (int i = 0; i < num_devices; i++) {
 
 ---
 
-## 2.3 资源创建流程
+## 2.3 Resource Creation Flow
 
-### 创建顺序
+### Creation Order
 
 ```
-1. Protection Domain (PD)   - 保护域，隔离不同应用的资源
+1. Protection Domain (PD)   - Protection domain, isolates resources of different applications
          │
          ▼
-2. Completion Queue (CQ)    - 完成队列，存储操作完成通知
+2. Completion Queue (CQ)    - Completion queue, stores operation completion notifications
          │
          ▼
-3. Queue Pair (QP)          - 队列对，通信基本单元
+3. Queue Pair (QP)          - Queue pair, basic communication unit
          │
          ▼
-4. Memory Region (MR)       - 内存区域，注册可访问的内存
+4. Memory Region (MR)       - Memory region, registers accessible memory
 ```
 
 ### Protection Domain (PD)
 
 ```c
-// 分配PD - 所有RDMA资源的容器
+// Allocate PD - container for all RDMA resources
 struct ibv_pd *pd;
 pd = ibv_alloc_pd(context);
 if (!pd) {
@@ -120,9 +120,9 @@ printf("PD allocated, handle=%d\n", pd->handle);
 ### Completion Queue (CQ)
 
 ```c
-// 创建CQ - 存储操作完成事件
+// Create CQ - stores operation completion events
 struct ibv_cq *cq;
-int cq_size = 128;  // 完成队列大小
+int cq_size = 128;  // Completion queue size
 
 cq = ibv_create_cq(context, cq_size, NULL, NULL, 0);
 if (!cq) {
@@ -135,16 +135,16 @@ printf("CQ created with %d entries\n", cq_size);
 ### Queue Pair (QP)
 
 ```c
-// 创建QP - 通信基本单元
+// Create QP - basic communication unit
 struct ibv_qp_init_attr qp_init_attr = {
-    .send_cq = cq,           // 发送完成队列
-    .recv_cq = cq,           // 接收完成队列
-    .qp_type = IBV_QPT_RC,   // 可靠连接
+    .send_cq = cq,           // Send completion queue
+    .recv_cq = cq,           // Receive completion queue
+    .qp_type = IBV_QPT_RC,   // Reliable connection
     .cap = {
-        .max_send_wr = 128,  // 最大发送WR数
-        .max_recv_wr = 128,  // 最大接收WR数
-        .max_send_sge = 1,   // 最大发送SGE数
-        .max_recv_sge = 1,   // 最大接收SGE数
+        .max_send_wr = 128,  // Max send WR count
+        .max_recv_wr = 128,  // Max receive WR count
+        .max_send_sge = 1,   // Max send SGE count
+        .max_recv_sge = 1,   // Max receive SGE count
     },
 };
 
@@ -160,15 +160,15 @@ printf("QP created, number=%u\n", qp->qp_num);
 ### Memory Region (MR)
 
 ```c
-// 注册内存 - 让RDMA设备可以访问
+// Register memory - make it accessible to the RDMA device
 #define BUFFER_SIZE 4096
 char *buffer = malloc(BUFFER_SIZE);
 
 struct ibv_mr *mr;
 mr = ibv_reg_mr(pd, buffer, BUFFER_SIZE, 
-                 IBV_ACCESS_LOCAL_WRITE |    // 本地可写
-                 IBV_ACCESS_REMOTE_READ |    // 远程可读
-                 IBV_ACCESS_REMOTE_WRITE);   // 远程可写
+                 IBV_ACCESS_LOCAL_WRITE |    // Local writable
+                 IBV_ACCESS_REMOTE_READ |    // Remote readable
+                 IBV_ACCESS_REMOTE_WRITE);   // Remote writable
 if (!mr) {
     perror("Failed to register MR");
     return -1;
@@ -176,43 +176,43 @@ if (!mr) {
 printf("MR registered: lkey=%u, rkey=%u\n", mr->lkey, mr->rkey);
 ```
 
-### 内存权限标志
+### Memory Permission Flags
 
-| 标志 | 说明 |
-|------|------|
-| `IBV_ACCESS_LOCAL_WRITE` | 本地CPU可写 |
-| `IBV_ACCESS_REMOTE_READ` | 远程可读 |
-| `IBV_ACCESS_REMOTE_WRITE` | 远程可写 |
-| `IBV_ACCESS_ATOMIC` | 远程原子操作 |
+| Flag | Description |
+|------|-------------|
+| `IBV_ACCESS_LOCAL_WRITE` | Local CPU writable |
+| `IBV_ACCESS_REMOTE_READ` | Remote readable |
+| `IBV_ACCESS_REMOTE_WRITE` | Remote writable |
+| `IBV_ACCESS_ATOMIC` | Remote atomic operations |
 
 ---
 
-## 2.4 QP状态机
+## 2.4 QP State Machine
 
-### 状态转换图
+### State Transition Diagram
 
 ```
          ┌─────────┐
-         │ RESET   │ ←── 初始状态
+         │ RESET   │ <── Initial state
          └────┬────┘
               │ ibv_modify_qp(IBV_QP_STATE)
               ▼
          ┌─────────┐
-         │  INIT   │ ←── 已初始化，不能通信
+         │  INIT   │ <── Initialized, cannot communicate
          └────┬────┘
               │ ibv_modify_qp(IBV_QP_STATE)
               ▼
          ┌─────────┐
-         │   RTR   │ ←── Ready to Receive，可以接收
+         │   RTR   │ <── Ready to Receive, can receive
          └────┬────┘
               │ ibv_modify_qp(IBV_QP_STATE)
               ▼
          ┌─────────┐
-         │   RTS   │ ←── Ready to Send，可以发送
+         │   RTS   │ <── Ready to Send, can send
          └─────────┘
 ```
 
-### 转换到INIT
+### Transition to INIT
 
 ```c
 struct ibv_qp_attr attr = {
@@ -227,24 +227,24 @@ struct ibv_qp_attr attr = {
 ibv_modify_qp(qp, &attr, IBV_QP_STATE);
 ```
 
-### 转换到RTR (Ready to Receive)
+### Transition to RTR (Ready to Receive)
 
 ```c
-// 需要知道对端的QP号和LID
+// Need to know the remote QP number and LID
 attr.qp_state = IBV_QPS_RTR;
 attr.path_mtu = IBV_MTU_256;
-attr.dest_qp_num = remote_qp_num;    // 对端QP号
+attr.dest_qp_num = remote_qp_num;    // Remote QP number
 attr.rq_psn = 0;
 attr.max_dest_rd_atomic = 1;
 attr.min_rnr_timer = 12;
-attr.ah_attr.dlid = remote_lid;      // 对端LID
+attr.ah_attr.dlid = remote_lid;      // Remote LID
 attr.ah_attr.sl = 0;
 attr.ah_attr.port_num = 1;
 
 ibv_modify_qp(qp, &attr, IBV_QP_STATE);
 ```
 
-### 转换到RTS (Ready to Send)
+### Transition to RTS (Ready to Send)
 
 ```c
 attr.qp_state = IBV_QPS_RTS;
@@ -259,33 +259,33 @@ ibv_modify_qp(qp, &attr, IBV_QP_STATE);
 
 ---
 
-## 2.5 通信操作
+## 2.5 Communication Operations
 
-### Post Send (发送)
+### Post Send
 
 ```c
-// 准备SGE (Scatter/Gather Element)
+// Prepare SGE (Scatter/Gather Element)
 struct ibv_sge sge = {
     .addr = (uint64_t)buffer,
     .length = BUFFER_SIZE,
     .lkey = mr->lkey,
 };
 
-// 准备Work Request
+// Prepare Work Request
 struct ibv_send_wr wr = {
     .wr_id = 0,
     .sg_list = &sge,
     .num_sge = 1,
-    .opcode = IBV_WR_SEND,           // 操作类型
-    .send_flags = IBV_SEND_SIGNALED, // 需要完成通知
+    .opcode = IBV_WR_SEND,           // Operation type
+    .send_flags = IBV_SEND_SIGNALED, // Request completion notification
 };
 
-// 提交发送请求
+// Submit send request
 struct ibv_send_wr *bad_wr;
 ibv_post_send(qp, &wr, &bad_wr);
 ```
 
-### Post Recv (接收)
+### Post Recv
 
 ```c
 struct ibv_recv_wr wr = {
@@ -315,59 +315,59 @@ if (ne > 0) {
 }
 ```
 
-### WC状态码
+### WC Status Codes
 
-| 状态码 | 说明 |
-|--------|------|
-| `IBV_WC_SUCCESS` | 成功 |
-| `IBV_WC_LOC_LEN_ERR` | 长度错误 |
-| `IBV_WC_LOC_QP_OP_ERR` | QP操作错误 |
-| `IBV_WC_WR_FLUSH_ERR` | 队列已刷新 |
-| `IBV_WC_REM_INV_REQ_ERR` | 远程无效请求 |
+| Status Code | Description |
+|-------------|-------------|
+| `IBV_WC_SUCCESS` | Success |
+| `IBV_WC_LOC_LEN_ERR` | Length error |
+| `IBV_WC_LOC_QP_OP_ERR` | QP operation error |
+| `IBV_WC_WR_FLUSH_ERR` | Queue flushed |
+| `IBV_WC_REM_INV_REQ_ERR` | Remote invalid request |
 
 ---
 
-## 2.6 资源销毁
+## 2.6 Resource Destruction
 
-### 销毁顺序（与创建顺序相反）
+### Destruction Order (Reverse of Creation Order)
 
 ```c
-// 1. 注销内存
+// 1. Deregister memory
 ibv_dereg_mr(mr);
 free(buffer);
 
-// 2. 销毁QP
+// 2. Destroy QP
 ibv_destroy_qp(qp);
 
-// 3. 销毁CQ
+// 3. Destroy CQ
 ibv_destroy_cq(cq);
 
-// 4. 释放PD
+// 4. Deallocate PD
 ibv_dealloc_pd(pd);
 
-// 5. 关闭设备
+// 5. Close device
 ibv_close_device(context);
 
-// 6. 释放设备列表
+// 6. Free device list
 ibv_free_device_list(device_list);
 ```
 
 ---
 
-## 2.7 完整示例运行验证
+## 2.7 Complete Example Run Verification
 
-### 编译
+### Compile
 ```bash
 cd ch02-verbs-api/01-initialization
 make
 ```
 
-### 运行（需要RDMA硬件）
+### Run (Requires RDMA Hardware)
 ```bash
 ./rdma_init
 ```
 
-### 预期输出（有RDMA设备）
+### Expected Output (With RDMA Device)
 ```
 QP State Transition Example
 ============================
@@ -410,7 +410,7 @@ Complete state transition sequence:
 All resources cleaned up
 ```
 
-### 如果没有RDMA设备
+### If No RDMA Device
 ```
 Found 0 RDMA device(s)
 No RDMA devices found
@@ -418,26 +418,26 @@ No RDMA devices found
 
 ---
 
-## 2.8 常见错误排查
+## 2.8 Common Error Troubleshooting
 
-| 错误 | 原因 | 解决方法 |
-|------|------|----------|
-| `No RDMA devices found` | 没有RDMA硬件或驱动 | 检查 `ibv_devices` |
-| `Failed to open device` | 权限不足 | 使用sudo运行 |
-| `Failed to allocate PD` | 资源不足 | 检查内核限制 |
-| `Failed to register MR` | 内存无效或权限不足 | 检查内存对齐和权限 |
-
----
-
-## 练习题
-
-1. **简答题**: 为什么要ibv_get_device_list而不是直接打开设备？
-2. **概念题**: PD、QP、MR之间的关系是什么？
-3. **画图题**: 画出QP状态转换图
-4. **编程题**: 修改示例代码，打印设备属性信息
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `No RDMA devices found` | No RDMA hardware or driver | Check `ibv_devices` |
+| `Failed to open device` | Insufficient permissions | Run with sudo |
+| `Failed to allocate PD` | Insufficient resources | Check kernel limits |
+| `Failed to register MR` | Invalid memory or insufficient permissions | Check memory alignment and permissions |
 
 ---
 
-## 下一步
+## Exercises
 
-进入下一章：[第四章：QP与MR深入](../ch04-qp-mr/README.md)
+1. **Short Answer**: Why use ibv_get_device_list instead of directly opening a device?
+2. **Conceptual**: What is the relationship between PD, QP, and MR?
+3. **Diagram**: Draw the QP state transition diagram
+4. **Programming**: Modify the example code to print device attribute information
+
+---
+
+## Next Step
+
+Go to the next chapter: [Chapter 4: Deep Dive into QP and MR](../ch04-qp-mr/README.md)

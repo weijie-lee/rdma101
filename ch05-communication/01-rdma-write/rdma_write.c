@@ -1,17 +1,17 @@
 /**
- * RDMA Write 示例 - 客户端推送数据到服务器
+ * RDMA Write Example - Client pushes data to server
  *
- * 支持 InfiniBand 和 RoCE 双模：自动检测传输层类型
+ * Supports both InfiniBand and RoCE: automatically detects transport layer type
  *
- * 流程：
- * 1. Server: 启动、创建资源、等待连接
- * 2. Client: 连接Server、交换MR信息（含 GID）、执行Write
- * 3. Server: 验证数据
+ * Flow:
+ * 1. Server: start, create resources, wait for connection
+ * 2. Client: connect to Server, exchange MR info (including GID), perform Write
+ * 3. Server: verify data
  *
- * 编译: gcc -o rdma_write rdma_write.c -I../../common ../../common/librdma_utils.a -libverbs
- * 运行:
- *   终端1: ./rdma_write server
- *   终端2: ./rdma_write client 127.0.0.1
+ * Build: gcc -o rdma_write rdma_write.c -I../../common ../../common/librdma_utils.a -libverbs
+ * Run:
+ *   Terminal 1: ./rdma_write server
+ *   Terminal 2: ./rdma_write client 127.0.0.1
  */
 
 #include <stdio.h>
@@ -21,14 +21,14 @@
 #include <arpa/inet.h>
 #include <infiniband/verbs.h>
 
-/* 引入公共工具库，获得 IB/RoCE 自动检测能力 */
+/* Import common utility library for IB/RoCE auto-detection capability */
 #include "../../common/rdma_utils.h"
 
 #define BUFFER_SIZE 1024
 #define MSG_SIZE 256
 #define TCP_PORT 9876
 
-/* RDMA 资源结构 */
+/* RDMA resource structure */
 struct rdma_resources {
     struct ibv_context *context;
     struct ibv_pd *pd;
@@ -36,21 +36,21 @@ struct rdma_resources {
     struct ibv_qp *qp;
     struct ibv_mr *mr;
     char *buffer;
-    uint16_t lid;           /* 本地端口 LID (IB 模式) */
-    union ibv_gid gid;      /* 本地 GID (RoCE 模式) */
-    int is_roce;            /* 是否为 RoCE 模式 */
+    uint16_t lid;           /* Local port LID (IB mode) */
+    union ibv_gid gid;      /* Local GID (RoCE mode) */
+    int is_roce;            /* Whether in RoCE mode */
 };
 
-/* 用于 TCP 交换的连接信息（扩展支持 GID） */
+/* Connection info for TCP exchange (extended to support GID) */
 struct connection_info {
     uint32_t qp_num;
     uint16_t lid;
-    union ibv_gid gid;      /* RoCE 模式下使用 GID 寻址 */
-    uint64_t buf_addr;       /* Server MR 的虚拟地址（供 client 写入） */
-    uint32_t buf_rkey;       /* Server MR 的 rkey */
+    union ibv_gid gid;      /* GID used for addressing in RoCE mode */
+    uint64_t buf_addr;       /* Virtual address of Server MR (for client to write to) */
+    uint32_t buf_rkey;       /* rkey of Server MR */
 };
 
-/* 初始化RDMA资源 */
+/* Initialize RDMA resources */
 int init_rdma_resources(struct rdma_resources *res)
 {
     struct ibv_device **device_list;
@@ -59,7 +59,7 @@ int init_rdma_resources(struct rdma_resources *res)
     struct ibv_port_attr port_attr;
     int num_devices;
 
-    /* 获取设备 */
+    /* Get device */
     device_list = ibv_get_device_list(&num_devices);
     if (!device_list || num_devices == 0) {
         fprintf(stderr, "No RDMA devices found\n");
@@ -67,7 +67,7 @@ int init_rdma_resources(struct rdma_resources *res)
     }
     device = device_list[0];
 
-    /* 打开设备 */
+    /* Open device */
     res->context = ibv_open_device(device);
     if (!res->context) {
         fprintf(stderr, "Failed to open device\n");
@@ -75,7 +75,7 @@ int init_rdma_resources(struct rdma_resources *res)
         return -1;
     }
 
-    /* 查询本地 LID */
+    /* Query local LID */
     if (ibv_query_port(res->context, 1, &port_attr) != 0) {
         fprintf(stderr, "Failed to query port\n");
         ibv_free_device_list(device_list);
@@ -83,19 +83,19 @@ int init_rdma_resources(struct rdma_resources *res)
     }
     res->lid = port_attr.lid;
 
-    /* 检测传输层类型：IB 还是 RoCE */
+    /* Detect transport layer type: IB or RoCE */
     enum rdma_transport transport = detect_transport(res->context, 1);
     res->is_roce = (transport == RDMA_TRANSPORT_ROCE);
-    printf("传输层类型: %s\n", transport_str(transport));
+    printf("Transport layer type: %s\n", transport_str(transport));
 
-    /* RoCE 模式下查询 GID */
+    /* Query GID in RoCE mode */
     if (res->is_roce) {
         if (ibv_query_gid(res->context, 1, RDMA_DEFAULT_GID_INDEX, &res->gid) != 0) {
-            fprintf(stderr, "查询 GID 失败\n");
+            fprintf(stderr, "Failed to query GID\n");
         }
     }
 
-    /* 分配PD */
+    /* Allocate PD */
     res->pd = ibv_alloc_pd(res->context);
     if (!res->pd) {
         fprintf(stderr, "Failed to allocate PD\n");
@@ -103,7 +103,7 @@ int init_rdma_resources(struct rdma_resources *res)
         return -1;
     }
 
-    /* 创建CQ */
+    /* Create CQ */
     res->cq = ibv_create_cq(res->context, 128, NULL, NULL, 0);
     if (!res->cq) {
         fprintf(stderr, "Failed to create CQ\n");
@@ -111,7 +111,7 @@ int init_rdma_resources(struct rdma_resources *res)
         return -1;
     }
 
-    /* 创建QP */
+    /* Create QP */
     memset(&qp_init_attr, 0, sizeof(qp_init_attr));
     qp_init_attr.send_cq = res->cq;
     qp_init_attr.recv_cq = res->cq;
@@ -128,7 +128,7 @@ int init_rdma_resources(struct rdma_resources *res)
         return -1;
     }
 
-    /* 注册内存 */
+    /* Register memory */
     res->buffer = malloc(BUFFER_SIZE);
     if (!res->buffer) {
         fprintf(stderr, "Failed to allocate buffer\n");
@@ -153,7 +153,7 @@ int init_rdma_resources(struct rdma_resources *res)
     return 0;
 }
 
-/* 修改QP到INIT状态 */
+/* Modify QP to INIT state */
 int modify_qp_to_init(struct ibv_qp *qp)
 {
     struct ibv_qp_attr attr = {
@@ -169,7 +169,7 @@ int modify_qp_to_init(struct ibv_qp *qp)
                          IBV_QP_PORT | IBV_QP_ACCESS_FLAGS);
 }
 
-/* 修改QP到RTR状态 — 支持 IB (LID) 和 RoCE (GID) 双模 */
+/* Modify QP to RTR state - supports both IB (LID) and RoCE (GID) modes */
 int modify_qp_to_rtr(struct ibv_qp *qp, uint32_t remote_qp_num,
                      uint16_t remote_lid, union ibv_gid *remote_gid,
                      uint8_t port, int is_roce)
@@ -187,14 +187,14 @@ int modify_qp_to_rtr(struct ibv_qp *qp, uint32_t remote_qp_num,
     attr.ah_attr.port_num = port;
 
     if (is_roce) {
-        /* RoCE 模式: 必须设置 is_global=1 + GRH */
+        /* RoCE mode: must set is_global=1 + GRH */
         attr.ah_attr.is_global = 1;
         attr.ah_attr.grh.dgid = *remote_gid;
         attr.ah_attr.grh.sgid_index = RDMA_DEFAULT_GID_INDEX;
         attr.ah_attr.grh.hop_limit = 64;
         attr.ah_attr.dlid = 0;
     } else {
-        /* IB 模式: 使用 LID 寻址 */
+        /* IB mode: use LID addressing */
         attr.ah_attr.is_global = 0;
         attr.ah_attr.dlid = remote_lid;
     }
@@ -206,7 +206,7 @@ int modify_qp_to_rtr(struct ibv_qp *qp, uint32_t remote_qp_num,
                          IBV_QP_AV);
 }
 
-/* 修改QP到RTS状态 */
+/* Modify QP to RTS state */
 int modify_qp_to_rts(struct ibv_qp *qp)
 {
     struct ibv_qp_attr attr = {
@@ -224,11 +224,11 @@ int modify_qp_to_rts(struct ibv_qp *qp)
                          IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC);
 }
 
-/* 执行RDMA Write */
+/* Perform RDMA Write */
 int rdma_write(struct rdma_resources *res, uint64_t remote_addr,
                uint32_t remote_rkey, const char *data, size_t size)
 {
-    /* 把数据拷到本地注册内存中 */
+    /* Copy data to locally registered memory */
     memcpy(res->buffer, data, size);
 
     struct ibv_sge sge = {
@@ -255,7 +255,7 @@ int rdma_write(struct rdma_resources *res, uint64_t remote_addr,
         return -1;
     }
 
-    /* 等待完成 */
+    /* Wait for completion */
     struct ibv_wc wc;
     while (1) {
         int ne = ibv_poll_cq(res->cq, 1, &wc);
@@ -276,8 +276,8 @@ int rdma_write(struct rdma_resources *res, uint64_t remote_addr,
 }
 
 /*
- * 通过 TCP socket 交换连接信息
- * server_ip == NULL 表示本端是 server，否则是 client 连接到 server_ip
+ * Exchange connection info via TCP socket
+ * server_ip == NULL means this side is server, otherwise client connects to server_ip
  */
 void exchange_connection(const char *server_ip,
                          struct connection_info *local,
@@ -297,7 +297,7 @@ void exchange_connection(const char *server_ip,
     addr.sin_port = htons(TCP_PORT);
 
     if (server_ip) {
-        /* Client：连接 server 并交换信息 */
+        /* Client: connect to server and exchange info */
         if (inet_pton(AF_INET, server_ip, &addr.sin_addr) <= 0) {
             fprintf(stderr, "Invalid server IP: %s\n", server_ip);
             close(sock);
@@ -308,11 +308,11 @@ void exchange_connection(const char *server_ip,
             close(sock);
             return;
         }
-        /* 先发本地信息，再收远端信息 */
+        /* Send local info first, then receive remote info */
         send(sock, local, sizeof(*local), 0);
         recv(sock, remote, sizeof(*remote), 0);
     } else {
-        /* Server：监听并交换信息 */
+        /* Server: listen and exchange info */
         int opt = 1;
         setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
         addr.sin_addr.s_addr = INADDR_ANY;
@@ -333,7 +333,7 @@ void exchange_connection(const char *server_ip,
             close(sock);
             return;
         }
-        /* 先收客户端信息，再发本地信息 */
+        /* Receive client info first, then send local info */
         recv(client, remote, sizeof(*remote), 0);
         send(client, local, sizeof(*local), 0);
         close(client);
@@ -341,7 +341,7 @@ void exchange_connection(const char *server_ip,
     close(sock);
 }
 
-/* 清理资源 */
+/* Cleanup resources */
 void cleanup_rdma_resources(struct rdma_resources *res)
 {
     if (res->mr) ibv_dereg_mr(res->mr);
@@ -360,12 +360,12 @@ int main(int argc, char *argv[])
 
     printf("Starting as %s\n", is_server ? "server" : "client");
 
-    /* 1. 初始化 RDMA 资源 */
+    /* 1. Initialize RDMA resources */
     if (init_rdma_resources(&res) != 0) {
         return 1;
     }
 
-    /* 2. 填写本地连接信息 */
+    /* 2. Fill in local connection info */
     struct connection_info local_info = {
         .qp_num   = res.qp->qp_num,
         .lid      = res.lid,
@@ -375,13 +375,13 @@ int main(int argc, char *argv[])
     };
     struct connection_info remote_info = {0};
 
-    /* 3. 通过 TCP 交换连接信息 */
+    /* 3. Exchange connection info via TCP */
     exchange_connection(peer_ip, &local_info, &remote_info);
     printf("Exchanged info: remote QP=%u, LID=%u, addr=%lu, rkey=0x%x\n",
            remote_info.qp_num, remote_info.lid,
            (unsigned long)remote_info.buf_addr, remote_info.buf_rkey);
 
-    /* 4. QP 状态转换：RESET -> INIT -> RTR -> RTS */
+    /* 4. QP state transition: RESET -> INIT -> RTR -> RTS */
     if (modify_qp_to_init(res.qp) != 0) {
         fprintf(stderr, "Failed to move QP to INIT\n");
         cleanup_rdma_resources(&res);
@@ -400,18 +400,18 @@ int main(int argc, char *argv[])
     }
     printf("QP state: RESET -> INIT -> RTR -> RTS (ready)\n");
 
-    /* 5. 执行 RDMA Write / 等待数据 */
+    /* 5. Perform RDMA Write / Wait for data */
     if (is_server) {
         printf("Server: MR ready. addr=%lu, rkey=0x%x\n",
                (unsigned long)local_info.buf_addr, local_info.buf_rkey);
         printf("Server: waiting for client to write data...\n");
 
-        /* Server 等待 client 写入：简单 sleep 后检查内存 */
+        /* Server waits for client to write: simple sleep then check memory */
         sleep(5);
 
         printf("Server: received data = \"%.*s\"\n", MSG_SIZE, res.buffer);
     } else {
-        /* Client：向 server 的 MR 执行 RDMA Write */
+        /* Client: perform RDMA Write to server's MR */
         const char *msg = "Hello RDMA Write! From client.";
         printf("Client: writing \"%s\" to server...\n", msg);
 
@@ -426,4 +426,3 @@ int main(int argc, char *argv[])
     cleanup_rdma_resources(&res);
     return 0;
 }
-

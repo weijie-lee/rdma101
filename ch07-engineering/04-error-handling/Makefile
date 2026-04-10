@@ -1,21 +1,21 @@
 # ch07-engineering/04-error-handling Makefile
 #
-# 编译两个错误处理演示程序:
-#   - trigger_errors:   故意触发 RDMA 错误并展示恢复
-#   - error_diagnosis:  RDMA 错误码诊断工具
+# Build two error handling demo programs:
+#   - trigger_errors:   Deliberately trigger RDMA errors and demonstrate recovery
+#   - error_diagnosis:  RDMA error code diagnostic tool
 
 CC = gcc
 CFLAGS = -Wall -O2 -g -I../../common
 LDFLAGS = -libverbs -L../../common -lrdma_utils
 
-# 公共工具库路径
+# Common utility library path
 COMMON_LIB = ../../common/librdma_utils.a
 
 TARGETS = trigger_errors error_diagnosis
 
 all: $(COMMON_LIB) $(TARGETS)
 
-# 确保公共库已编译
+# Ensure common library is built
 $(COMMON_LIB):
 	$(MAKE) -C ../../common
 

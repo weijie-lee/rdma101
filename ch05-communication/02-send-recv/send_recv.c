@@ -1,12 +1,12 @@
 /**
- * Send/Recv 通信示例
- * 完整的 Client-Server 实现
+ * Send/Recv Communication Example
+ * Complete Client-Server Implementation
  *
- * 支持 IB/RoCE 双模自动检测:
- *   - IB 模式: 使用 LID 寻址
- *   - RoCE 模式: 使用 GID 寻址 (ah_attr.is_global=1 + GRH)
+ * Supports IB/RoCE dual-mode auto-detection:
+ *   - IB mode: uses LID addressing
+ *   - RoCE mode: uses GID addressing (ah_attr.is_global=1 + GRH)
  *
- * 编译: gcc -Wall -O2 -g -o send_recv send_recv.c \
+ * Build: gcc -Wall -O2 -g -o send_recv send_recv.c \
  *        -I../../common -L../../common -lrdma_utils -libverbs
  */
 
@@ -23,13 +23,13 @@
 #define MSG_DATA 2
 #define MSG_DONE 3
 
-/* 消息结构 */
+/* Message structure */
 struct msg_header {
     uint32_t type;
     uint32_t size;
 };
 
-/* RDMA 资源 */
+/* RDMA resources */
 struct rdma_context {
     struct ibv_context *ctx;
     struct ibv_pd *pd;
@@ -39,11 +39,11 @@ struct rdma_context {
     char *buf;
     uint32_t qp_num;
     uint16_t lid;
-    union ibv_gid gid;  /* GID (RoCE 模式) */
-    int is_roce;        /* IB/RoCE 自动检测结果 */
+    union ibv_gid gid;  /* GID (RoCE mode) */
+    int is_roce;        /* IB/RoCE auto-detection result */
 };
 
-/* 初始化 */
+/* Initialize */
 int init_rdma(struct rdma_context *ctx)
 {
     struct ibv_device **list;
@@ -62,17 +62,17 @@ int init_rdma(struct rdma_context *ctx)
         return -1;
     }
 
-    /* 获取本地LID */
+    /* Get local LID */
     struct ibv_port_attr attr;
     ibv_query_port(ctx->ctx, 1, &attr);
     ctx->lid = attr.lid;
 
-    /* 检测传输层类型: IB 还是 RoCE */
+    /* Detect transport layer type: IB or RoCE */
     enum rdma_transport transport = detect_transport(ctx->ctx, 1);
     ctx->is_roce = (transport == RDMA_TRANSPORT_ROCE);
-    printf("传输层类型: %s\n", transport_str(transport));
+    printf("Transport layer type: %s\n", transport_str(transport));
 
-    /* RoCE 模式下查询 GID */
+    /* Query GID in RoCE mode */
     if (ctx->is_roce) {
         ibv_query_gid(ctx->ctx, 1, RDMA_DEFAULT_GID_INDEX, &ctx->gid);
     }
@@ -102,7 +102,7 @@ int init_rdma(struct rdma_context *ctx)
     return 0;
 }
 
-/* 修改QP状态 */
+/* Modify QP state */
 int modify_qp_to_init(struct ibv_qp *qp)
 {
     struct ibv_qp_attr attr = {
@@ -134,14 +134,14 @@ int modify_qp_to_rtr(struct ibv_qp *qp, uint32_t remote_qp, uint16_t remote_lid,
     attr.ah_attr.port_num = 1;
 
     if (is_roce) {
-        /* RoCE 模式: 使用 GID 寻址 */
+        /* RoCE mode: use GID addressing */
         attr.ah_attr.is_global = 1;
         attr.ah_attr.grh.dgid = *remote_gid;
         attr.ah_attr.grh.sgid_index = RDMA_DEFAULT_GID_INDEX;
         attr.ah_attr.grh.hop_limit = 64;
         attr.ah_attr.dlid = 0;
     } else {
-        /* IB 模式: 使用 LID 寻址 */
+        /* IB mode: use LID addressing */
         attr.ah_attr.is_global = 0;
         attr.ah_attr.dlid = remote_lid;
     }
@@ -169,16 +169,16 @@ int modify_qp_to_rts(struct ibv_qp *qp)
                          IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC);
 }
 
-/* 交换信息（通过socket）
- * server_ip == NULL 表示本端是 server
- * 使用 rdma_endpoint 结构交换完整连接信息 (含 GID)
+/* Exchange info (via socket)
+ * server_ip == NULL means this side is server
+ * Uses rdma_endpoint structure to exchange complete connection info (including GID)
  */
 void exchange_info(const char *server_ip, uint32_t local_qp, uint16_t local_lid,
                    union ibv_gid *local_gid,
                    uint32_t *remote_qp, uint16_t *remote_lid,
                    union ibv_gid *remote_gid)
 {
-    /* 打包发送/接收的数据 */
+    /* Pack data for send/receive */
     struct {
         uint32_t qp_num;
         uint16_t lid;
@@ -252,7 +252,7 @@ void exchange_info(const char *server_ip, uint32_t local_qp, uint16_t local_lid,
         *remote_gid = remote_data.gid;
 }
 
-/* 发送消息 */
+/* Send message */
 int send_message(struct rdma_context *ctx, void *data, size_t len, int opcode)
 {
     struct ibv_sge sge = {
@@ -260,7 +260,7 @@ int send_message(struct rdma_context *ctx, void *data, size_t len, int opcode)
         .length = len,
         .lkey = ctx->mr->lkey,
     };
-    
+
     struct ibv_send_wr wr = {
         .wr_id = opcode,
         .sg_list = &sge,
@@ -268,24 +268,24 @@ int send_message(struct rdma_context *ctx, void *data, size_t len, int opcode)
         .opcode = opcode == MSG_DONE ? IBV_WR_SEND_WITH_IMM : IBV_WR_SEND,
         .send_flags = IBV_SEND_SIGNALED,
     };
-    
+
     if (opcode == MSG_DONE) {
         wr.imm_data = htobe32(opcode);
     }
-    
+
     struct ibv_send_wr *bad;
     if (ibv_post_send(ctx->qp, &wr, &bad)) {
         return -1;
     }
-    
-    /* 等待完成 */
+
+    /* Wait for completion */
     struct ibv_wc wc;
     while (ibv_poll_cq(ctx->cq, 1, &wc) == 0);
-    
+
     return (wc.status == IBV_WC_SUCCESS) ? 0 : -1;
 }
 
-/* 接收消息 */
+/* Receive message */
 int recv_message(struct rdma_context *ctx)
 {
     struct ibv_sge sge = {
@@ -293,26 +293,26 @@ int recv_message(struct rdma_context *ctx)
         .length = BUFFER_SIZE,
         .lkey = ctx->mr->lkey,
     };
-    
+
     struct ibv_recv_wr wr = {
         .wr_id = 0,
         .sg_list = &sge,
         .num_sge = 1,
     };
-    
+
     struct ibv_recv_wr *bad;
     if (ibv_post_recv(ctx->qp, &wr, &bad)) {
         return -1;
     }
-    
-    /* 等待完成 */
+
+    /* Wait for completion */
     struct ibv_wc wc;
     while (ibv_poll_cq(ctx->cq, 1, &wc) == 0);
-    
+
     if (wc.status != IBV_WC_SUCCESS) {
         return -1;
     }
-    
+
     return wc.byte_len;
 }
 
@@ -333,7 +333,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    /* 交换连接信息（含 GID 以支持 RoCE） */
+    /* Exchange connection info (including GID for RoCE support) */
     uint32_t remote_qp;
     uint16_t remote_lid;
     union ibv_gid remote_gid;
@@ -356,14 +356,14 @@ int main(int argc, char *argv[])
     if (is_server) {
         printf("Server ready, waiting for messages...\n");
 
-        /* 预 post recv：为接收 3 条消息各预备一个 recv WR */
+        /* Pre-post recv: prepare one recv WR for each of 3 messages */
         for (int i = 0; i < 3; i++) {
             recv_message(&ctx);
         }
 
-        /* 处理消息 */
+        /* Process messages */
         for (int i = 0; i < 3; i++) {
-            /* 等待 CQ 完成（recv_message 内部已 post recv + poll CQ） */
+            /* Wait for CQ completion (recv_message internally already posts recv + polls CQ) */
             struct ibv_wc wc;
             while (ibv_poll_cq(ctx.cq, 1, &wc) == 0);
 
@@ -378,7 +378,7 @@ int main(int argc, char *argv[])
 
             if (hdr->type == MSG_DONE) break;
 
-            /* 回复 ACK（先 post recv 用于后续消息，再 send） */
+            /* Reply ACK (post recv for subsequent messages first, then send) */
             recv_message(&ctx);
             char reply[] = "ACK";
             memcpy(ctx.buf, reply, sizeof(reply));
@@ -387,23 +387,23 @@ int main(int argc, char *argv[])
     } else {
         printf("Client sending messages...\n");
 
-        /* 预 post recv，准备接收 server 的 ACK */
+        /* Pre-post recv, ready to receive server's ACK */
         recv_message(&ctx);
 
-        /* 发送消息 */
+        /* Send message */
         struct msg_header msg = {.type = MSG_HELLO, .size = 13};
         memcpy(ctx.buf, &msg, sizeof(msg));
         memcpy(ctx.buf + sizeof(msg), "Hello Server!", 13);
         send_message(&ctx, ctx.buf, sizeof(msg) + 13, MSG_DATA);
 
-        /* 等待 ACK（poll CQ） */
+        /* Wait for ACK (poll CQ) */
         struct ibv_wc wc;
         while (ibv_poll_cq(ctx.cq, 1, &wc) == 0);
         if (wc.status == IBV_WC_SUCCESS) {
             printf("Got ACK: \"%.*s\"\n", (int)wc.byte_len, ctx.buf);
         }
 
-        /* 发送完成信号 */
+        /* Send done signal */
         send_message(&ctx, NULL, 0, MSG_DONE);
     }
 

@@ -1,6 +1,6 @@
 /**
- * RDMA 初始化示例
- * 演示基本的设备发现、打开、PD/CQ/QP创建
+ * RDMA Initialization Example
+ * Demonstrates basic device discovery, opening, PD/CQ/QP creation
  */
 
 #include <stdio.h>
@@ -19,7 +19,7 @@ int main(int argc, char *argv[])
     int num_devices;
     int i;
 
-    /* 1. 获取设备列表 */
+    /* 1. Get device list */
     device_list = ibv_get_device_list(&num_devices);
     if (!device_list) {
         perror("Failed to get device list");
@@ -36,7 +36,7 @@ int main(int argc, char *argv[])
         printf("  %d: %s\n", i, ibv_get_device_name(device_list[i]));
     }
 
-    /* 2. 选择第一个设备并打开 */
+    /* 2. Select the first device and open it */
     device = device_list[0];
     context = ibv_open_device(device);
     if (!context) {
@@ -45,7 +45,7 @@ int main(int argc, char *argv[])
     }
     printf("Opened device: %s\n", ibv_get_device_name(device));
 
-    /* 3. 分配 Protection Domain */
+    /* 3. Allocate Protection Domain */
     pd = ibv_alloc_pd(context);
     if (!pd) {
         perror("Failed to allocate PD");
@@ -53,7 +53,7 @@ int main(int argc, char *argv[])
     }
     printf("Allocated PD\n");
 
-    /* 4. 创建 Completion Queue */
+    /* 4. Create Completion Queue */
     cq = ibv_create_cq(context, 128, NULL, NULL, 0);
     if (!cq) {
         perror("Failed to create CQ");
@@ -61,7 +61,7 @@ int main(int argc, char *argv[])
     }
     printf("Created CQ with %d entries\n", 128);
 
-    /* 5. 创建 Queue Pair */
+    /* 5. Create Queue Pair */
     memset(&qp_init_attr, 0, sizeof(qp_init_attr));
     qp_init_attr.send_cq = cq;
     qp_init_attr.recv_cq = cq;
@@ -78,16 +78,16 @@ int main(int argc, char *argv[])
     }
     printf("Created QP with num=%u\n", qp->qp_num);
 
-    /* 6. 查询QP状态 */
+    /* 6. Query QP state */
     struct ibv_qp_attr attr;
     struct ibv_qp_init_attr init_attr;
     if (ibv_query_qp(qp, &attr, IBV_QP_STATE, &init_attr) == 0) {
         printf("QP state: %d (RESET=%d, INIT=%d, RTR=%d, RTS=%d)\n",
-               attr.qp_state, IBV_QPS_RESET, IBV_QPS_INIT, 
+               attr.qp_state, IBV_QPS_RESET, IBV_QPS_INIT,
                IBV_QPS_RTR, IBV_QPS_RTS);
     }
 
-    /* 6. 注册内存 (Memory Region) - 允许RDMA设备访问该内存 */
+    /* 6. Register Memory (Memory Region) - allow RDMA device to access this memory */
     char *mr_buf = malloc(4096);
     if (!mr_buf) {
         perror("Failed to allocate memory for MR");
@@ -107,7 +107,7 @@ int main(int argc, char *argv[])
     printf("Registered MR: lkey=0x%x, rkey=0x%x, addr=%p, len=%zu\n",
            mr->lkey, mr->rkey, mr->addr, mr->length);
 
-    /* 7. 清理资源 */
+    /* 7. Cleanup resources */
     if (ibv_dereg_mr(mr)) {
         perror("Failed to deregister MR");
     }

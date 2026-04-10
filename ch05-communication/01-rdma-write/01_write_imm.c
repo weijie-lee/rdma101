@@ -1,22 +1,22 @@
 /**
- * RDMA Write with Immediate Data 示例
+ * RDMA Write with Immediate Data Example
  *
- * 演示 IBV_WR_RDMA_WRITE_WITH_IMM 操作：
- *   - Client 使用 RDMA Write with Imm 向 Server 写入数据
- *   - Server 必须预先 ibv_post_recv() 才能接收 immediate data
- *   - Server 的 WC 中 opcode = IBV_WC_RECV_RDMA_WITH_IMM，且 wc.imm_data 被设置
- *   - imm_data (32-bit) 可作为 "通知信号"，告知 Server 数据已写入完成
+ * Demonstrates the IBV_WR_RDMA_WRITE_WITH_IMM operation:
+ *   - Client uses RDMA Write with Imm to write data to Server
+ *   - Server must call ibv_post_recv() in advance to receive immediate data
+ *   - Server's WC has opcode = IBV_WC_RECV_RDMA_WITH_IMM, and wc.imm_data is set
+ *   - imm_data (32-bit) can serve as a "notification signal" to inform Server that data write is complete
  *
- * 对比普通 RDMA Write：
- *   - 普通 Write: Server 端完全无感知，没有任何 CQ 通知
- *   - Write with Imm: Server 端会收到一个带 imm_data 的 recv completion
- *   - 代价: Server 必须提前 post recv WR（消耗一个 recv WR 槽位）
+ * Comparison with regular RDMA Write:
+ *   - Regular Write: Server side is completely unaware, no CQ notification at all
+ *   - Write with Imm: Server side receives a recv completion with imm_data
+ *   - Cost: Server must post recv WR in advance (consumes one recv WR slot)
  *
- * 用法:
- *   服务器: ./01_write_imm server
- *   客户端: ./01_write_imm client <server_ip>
+ * Usage:
+ *   Server: ./01_write_imm server
+ *   Client: ./01_write_imm client <server_ip>
  *
- * 编译: gcc -Wall -O2 -g -o 01_write_imm 01_write_imm.c -I../../common -L../../common -lrdma_utils -libverbs
+ * Build: gcc -Wall -O2 -g -o 01_write_imm 01_write_imm.c -I../../common -L../../common -lrdma_utils -libverbs
  */
 
 #include <stdio.h>
@@ -29,9 +29,9 @@
 
 #define BUFFER_SIZE     4096
 #define TCP_PORT        19876
-#define IMM_MAGIC       0x12345678  /* 自定义立即数：表示 "写入完成" */
+#define IMM_MAGIC       0x12345678  /* Custom immediate data: indicates "write complete" */
 
-/* ========== RDMA 资源 ========== */
+/* ========== RDMA Resources ========== */
 struct write_imm_ctx {
     struct ibv_context  *ctx;
     struct ibv_pd       *pd;
@@ -40,10 +40,10 @@ struct write_imm_ctx {
     struct ibv_mr       *mr;
     char                *buf;
     uint8_t              port;
-    int                  is_roce;   /* 自动检测: 0=IB, 1=RoCE */
+    int                  is_roce;   /* Auto-detect: 0=IB, 1=RoCE */
 };
 
-/* ========== 初始化 RDMA 资源 ========== */
+/* ========== Initialize RDMA Resources ========== */
 static int init_resources(struct write_imm_ctx *res)
 {
     struct ibv_device **dev_list = NULL;
@@ -51,31 +51,31 @@ static int init_resources(struct write_imm_ctx *res)
     int ret = -1;
 
     dev_list = ibv_get_device_list(&num_devices);
-    CHECK_NULL(dev_list, "获取 RDMA 设备列表失败");
+    CHECK_NULL(dev_list, "Failed to get RDMA device list");
     if (num_devices == 0) {
-        fprintf(stderr, "[错误] 没有找到任何 RDMA 设备\n");
+        fprintf(stderr, "[Error] No RDMA devices found\n");
         goto cleanup;
     }
 
     res->ctx = ibv_open_device(dev_list[0]);
-    CHECK_NULL(res->ctx, "打开 RDMA 设备失败");
-    printf("[信息] 打开设备: %s\n", ibv_get_device_name(dev_list[0]));
+    CHECK_NULL(res->ctx, "Failed to open RDMA device");
+    printf("[Info] Opened device: %s\n", ibv_get_device_name(dev_list[0]));
 
-    /* 检测传输层类型 */
+    /* Detect transport layer type */
     res->port = RDMA_DEFAULT_PORT_NUM;
     enum rdma_transport transport = detect_transport(res->ctx, res->port);
     res->is_roce = (transport == RDMA_TRANSPORT_ROCE);
-    printf("[信息] 传输层类型: %s\n", transport_str(transport));
+    printf("[Info] Transport layer type: %s\n", transport_str(transport));
 
-    /* 分配 PD */
+    /* Allocate PD */
     res->pd = ibv_alloc_pd(res->ctx);
-    CHECK_NULL(res->pd, "分配保护域失败");
+    CHECK_NULL(res->pd, "Failed to allocate protection domain");
 
-    /* 创建 CQ */
+    /* Create CQ */
     res->cq = ibv_create_cq(res->ctx, 128, NULL, NULL, 0);
-    CHECK_NULL(res->cq, "创建完成队列失败");
+    CHECK_NULL(res->cq, "Failed to create completion queue");
 
-    /* 创建 RC QP */
+    /* Create RC QP */
     struct ibv_qp_init_attr qp_attr;
     memset(&qp_attr, 0, sizeof(qp_attr));
     qp_attr.send_cq = res->cq;
@@ -87,21 +87,21 @@ static int init_resources(struct write_imm_ctx *res)
     qp_attr.cap.max_recv_sge = 1;
 
     res->qp = ibv_create_qp(res->pd, &qp_attr);
-    CHECK_NULL(res->qp, "创建队列对失败");
+    CHECK_NULL(res->qp, "Failed to create queue pair");
 
-    /* 分配并注册内存 */
+    /* Allocate and register memory */
     res->buf = (char *)malloc(BUFFER_SIZE);
-    CHECK_NULL(res->buf, "分配缓冲区失败");
+    CHECK_NULL(res->buf, "Failed to allocate buffer");
     memset(res->buf, 0, BUFFER_SIZE);
 
-    /* Server 需要 REMOTE_WRITE 权限; Client 需要 LOCAL_WRITE */
+    /* Server needs REMOTE_WRITE permission; Client needs LOCAL_WRITE */
     res->mr = ibv_reg_mr(res->pd, res->buf, BUFFER_SIZE,
                          IBV_ACCESS_LOCAL_WRITE |
                          IBV_ACCESS_REMOTE_WRITE |
                          IBV_ACCESS_REMOTE_READ);
-    CHECK_NULL(res->mr, "注册内存区域失败");
+    CHECK_NULL(res->mr, "Failed to register memory region");
 
-    printf("[信息] QP num=%u, MR addr=%p, lkey=0x%x, rkey=0x%x\n",
+    printf("[Info] QP num=%u, MR addr=%p, lkey=0x%x, rkey=0x%x\n",
            res->qp->qp_num, (void *)res->buf, res->mr->lkey, res->mr->rkey);
 
     ret = 0;
@@ -112,14 +112,14 @@ cleanup:
     return ret;
 }
 
-/* ========== Server: 预先 post recv 以接收 imm_data ========== */
+/* ========== Server: pre-post recv to receive imm_data ========== */
 static int server_post_recv(struct write_imm_ctx *res)
 {
     /*
-     * Write with Immediate 会消耗对端一个 recv WR。
-     * Server 必须提前 post recv，否则会产生 RNR 错误。
-     * recv WR 的 SGE 可以为空（length=0）因为数据是通过 RDMA Write 直接写入的，
-     * 但这里我们仍然提供一个 SGE，以便在 WC 中看到 byte_len。
+     * Write with Immediate consumes a recv WR on the remote side.
+     * Server must post recv in advance, otherwise an RNR error will occur.
+     * The recv WR's SGE can be empty (length=0) because data is written directly via RDMA Write,
+     * but here we still provide an SGE so we can see byte_len in the WC.
      */
     struct ibv_sge sge = {
         .addr   = (uint64_t)res->buf,
@@ -128,7 +128,7 @@ static int server_post_recv(struct write_imm_ctx *res)
     };
 
     struct ibv_recv_wr wr = {
-        .wr_id   = 1001,   /* 自定义 ID，方便在 WC 中识别 */
+        .wr_id   = 1001,   /* Custom ID for easy identification in WC */
         .sg_list = &sge,
         .num_sge = 1,
     };
@@ -136,19 +136,19 @@ static int server_post_recv(struct write_imm_ctx *res)
     struct ibv_recv_wr *bad_wr = NULL;
     int ret = ibv_post_recv(res->qp, &wr, &bad_wr);
     if (ret != 0) {
-        fprintf(stderr, "[错误] ibv_post_recv 失败: ret=%d errno=%d\n", ret, errno);
+        fprintf(stderr, "[Error] ibv_post_recv failed: ret=%d errno=%d\n", ret, errno);
         return -1;
     }
-    printf("[Server] 已 post recv (wr_id=1001)，等待 Write with Imm 通知\n");
+    printf("[Server] Posted recv (wr_id=1001), waiting for Write with Imm notification\n");
     return 0;
 }
 
-/* ========== Client: 执行 RDMA Write with Immediate ========== */
+/* ========== Client: perform RDMA Write with Immediate ========== */
 static int client_write_imm(struct write_imm_ctx *res,
                             uint64_t remote_addr, uint32_t remote_rkey)
 {
-    /* 准备要写入的数据 */
-    const char *msg = "Hello! 这是通过 RDMA Write with Immediate Data 写入的消息!";
+    /* Prepare data to write */
+    const char *msg = "Hello! This message was written via RDMA Write with Immediate Data!";
     size_t msg_len = strlen(msg) + 1;
     memcpy(res->buf, msg, msg_len);
 
@@ -163,97 +163,97 @@ static int client_write_imm(struct write_imm_ctx *res,
     wr.wr_id      = 2001;
     wr.sg_list    = &sge;
     wr.num_sge    = 1;
-    wr.opcode     = IBV_WR_RDMA_WRITE_WITH_IMM;  /* 关键: Write + Immediate */
+    wr.opcode     = IBV_WR_RDMA_WRITE_WITH_IMM;  /* Key: Write + Immediate */
     wr.send_flags = IBV_SEND_SIGNALED;
-    wr.imm_data   = htobe32(IMM_MAGIC);  /* 立即数 (网络字节序) */
+    wr.imm_data   = htobe32(IMM_MAGIC);  /* Immediate data (network byte order) */
     wr.wr.rdma.remote_addr = remote_addr;
     wr.wr.rdma.rkey        = remote_rkey;
 
     struct ibv_send_wr *bad_wr = NULL;
     int ret = ibv_post_send(res->qp, &wr, &bad_wr);
     if (ret != 0) {
-        fprintf(stderr, "[错误] ibv_post_send 失败: ret=%d errno=%d\n", ret, errno);
+        fprintf(stderr, "[Error] ibv_post_send failed: ret=%d errno=%d\n", ret, errno);
         return -1;
     }
 
-    printf("[Client] 已发送 RDMA Write with Imm (imm_data=0x%X)\n", IMM_MAGIC);
-    printf("[Client]   数据: \"%s\" (%zu 字节)\n", msg, msg_len);
-    printf("[Client]   目标: remote_addr=0x%lx, rkey=0x%x\n",
+    printf("[Client] Sent RDMA Write with Imm (imm_data=0x%X)\n", IMM_MAGIC);
+    printf("[Client]   Data: \"%s\" (%zu bytes)\n", msg, msg_len);
+    printf("[Client]   Target: remote_addr=0x%lx, rkey=0x%x\n",
            (unsigned long)remote_addr, remote_rkey);
 
-    /* 等待发送完成 */
+    /* Wait for send completion */
     struct ibv_wc wc;
     ret = poll_cq_blocking(res->cq, &wc);
     if (ret != 0) return -1;
 
-    printf("\n[Client] === 发送端 WC 详情 ===\n");
+    printf("\n[Client] === Sender WC Details ===\n");
     print_wc_detail(&wc);
 
     if (wc.status != IBV_WC_SUCCESS) {
-        fprintf(stderr, "[错误] 发送失败: %s\n", ibv_wc_status_str(wc.status));
+        fprintf(stderr, "[Error] Send failed: %s\n", ibv_wc_status_str(wc.status));
         return -1;
     }
 
-    printf("[Client] RDMA Write with Imm 完成!\n");
+    printf("[Client] RDMA Write with Imm completed!\n");
     return 0;
 }
 
-/* ========== Server: 等待并处理 Write with Imm 的 recv completion ========== */
+/* ========== Server: wait and process Write with Imm recv completion ========== */
 static int server_wait_imm(struct write_imm_ctx *res)
 {
     struct ibv_wc wc;
     int ret = poll_cq_blocking(res->cq, &wc);
     if (ret != 0) return -1;
 
-    printf("\n[Server] === 接收端 WC 详情 ===\n");
+    printf("\n[Server] === Receiver WC Details ===\n");
     print_wc_detail(&wc);
 
     if (wc.status != IBV_WC_SUCCESS) {
-        fprintf(stderr, "[错误] 接收 WC 失败: %s\n", ibv_wc_status_str(wc.status));
+        fprintf(stderr, "[Error] Receive WC failed: %s\n", ibv_wc_status_str(wc.status));
         return -1;
     }
 
-    /* 验证 opcode */
+    /* Verify opcode */
     if (wc.opcode == IBV_WC_RECV_RDMA_WITH_IMM) {
         uint32_t imm = be32toh(wc.imm_data);
-        printf("\n[Server] *** 收到 Write with Immediate 通知! ***\n");
-        printf("[Server]   opcode = IBV_WC_RECV_RDMA_WITH_IMM (正确)\n");
+        printf("\n[Server] *** Received Write with Immediate notification! ***\n");
+        printf("[Server]   opcode = IBV_WC_RECV_RDMA_WITH_IMM (correct)\n");
         printf("[Server]   imm_data = 0x%X", imm);
         if (imm == IMM_MAGIC) {
-            printf(" (匹配 IMM_MAGIC，确认写入完成)\n");
+            printf(" (matches IMM_MAGIC, write completion confirmed)\n");
         } else {
-            printf(" (未知立即数)\n");
+            printf(" (unknown immediate data)\n");
         }
         printf("[Server]   wr_id = %lu\n", (unsigned long)wc.wr_id);
     } else {
-        printf("[Server] 意外的 opcode: %d\n", wc.opcode);
+        printf("[Server] Unexpected opcode: %d\n", wc.opcode);
     }
 
-    /* 读取 RDMA Write 写入的数据 */
-    printf("\n[Server] 缓冲区中的数据: \"%s\"\n", res->buf);
+    /* Read data written by RDMA Write */
+    printf("\n[Server] Data in buffer: \"%s\"\n", res->buf);
 
     return 0;
 }
 
-/* ========== 对比说明: 普通 RDMA Write ========== */
+/* ========== Comparison: Regular RDMA Write ========== */
 static void print_comparison(void)
 {
     printf("\n");
     printf("╔═══════════════════════════════════════════════════════════════╗\n");
-    printf("║          普通 RDMA Write  vs  RDMA Write with Immediate     ║\n");
+    printf("║       Regular RDMA Write  vs  RDMA Write with Immediate     ║\n");
     printf("╠═══════════════════════════════════════════════════════════════╣\n");
-    printf("║ 特性           │ 普通 Write      │ Write with Imm           ║\n");
+    printf("║ Feature        │ Regular Write   │ Write with Imm           ║\n");
     printf("║────────────────┼─────────────────┼──────────────────────────║\n");
-    printf("║ Server 通知    │ 无 (完全无感知) │ 有 (CQ 收到 recv WC)    ║\n");
-    printf("║ Server post_rv │ 不需要          │ 必须预先 post_recv      ║\n");
-    printf("║ WC opcode      │ 无              │ IBV_WC_RECV_RDMA_WITH_IM║\n");
-    printf("║ imm_data       │ 无              │ 32-bit 自定义数据       ║\n");
-    printf("║ 适用场景       │ 不需要通知      │ 需要写完成通知          ║\n");
+    printf("║ Server notif.  │ None (unaware)  │ Yes (CQ recv WC)        ║\n");
+    printf("║ Server post_rv │ Not needed      │ Must pre-post recv      ║\n");
+    printf("║ WC opcode      │ None            │ IBV_WC_RECV_RDMA_WITH_IM║\n");
+    printf("║ imm_data       │ None            │ 32-bit custom data      ║\n");
+    printf("║ Use case       │ No notif needed │ Write completion notif  ║\n");
     printf("╚═══════════════════════════════════════════════════════════════╝\n");
     printf("\n");
 }
 
-/* ========== 清理资源 ========== */
+/* ========== Cleanup Resources ========== */
 static void cleanup_resources(struct write_imm_ctx *res)
 {
     if (res->mr)      ibv_dereg_mr(res->mr);
@@ -264,13 +264,13 @@ static void cleanup_resources(struct write_imm_ctx *res)
     if (res->ctx)     ibv_close_device(res->ctx);
 }
 
-/* ========== 主函数 ========== */
+/* ========== Main Function ========== */
 int main(int argc, char *argv[])
 {
     if (argc < 2) {
-        fprintf(stderr, "用法: %s server|client [server_ip]\n", argv[0]);
-        fprintf(stderr, "  服务器: %s server\n", argv[0]);
-        fprintf(stderr, "  客户端: %s client <server_ip>\n", argv[0]);
+        fprintf(stderr, "Usage: %s server|client [server_ip]\n", argv[0]);
+        fprintf(stderr, "  Server: %s server\n", argv[0]);
+        fprintf(stderr, "  Client: %s client <server_ip>\n", argv[0]);
         return 1;
     }
 
@@ -278,8 +278,8 @@ int main(int argc, char *argv[])
     const char *server_ip = is_server ? NULL : (argc > 2 ? argv[2] : "127.0.0.1");
 
     printf("========================================\n");
-    printf("  RDMA Write with Immediate Data 示例\n");
-    printf("  角色: %s\n", is_server ? "服务器" : "客户端");
+    printf("  RDMA Write with Immediate Data Example\n");
+    printf("  Role: %s\n", is_server ? "Server" : "Client");
     printf("========================================\n\n");
 
     print_comparison();
@@ -287,86 +287,86 @@ int main(int argc, char *argv[])
     struct write_imm_ctx res;
     memset(&res, 0, sizeof(res));
 
-    /* 1. 初始化 RDMA 资源 */
+    /* 1. Initialize RDMA resources */
     if (init_resources(&res) != 0) {
-        fprintf(stderr, "[错误] 初始化 RDMA 资源失败\n");
+        fprintf(stderr, "[Error] Failed to initialize RDMA resources\n");
         return 1;
     }
 
-    /* 2. 填充本地端点信息 */
+    /* 2. Fill local endpoint info */
     struct rdma_endpoint local_ep, remote_ep;
     memset(&local_ep, 0, sizeof(local_ep));
     memset(&remote_ep, 0, sizeof(remote_ep));
 
     if (fill_local_endpoint(res.ctx, res.qp, res.port,
                             RDMA_DEFAULT_GID_INDEX, &local_ep) != 0) {
-        fprintf(stderr, "[错误] 填充本地端点信息失败\n");
+        fprintf(stderr, "[Error] Failed to fill local endpoint info\n");
         cleanup_resources(&res);
         return 1;
     }
-    /* 附加 MR 信息供远端 RDMA Write 使用 */
+    /* Attach MR info for remote RDMA Write use */
     local_ep.buf_addr = (uint64_t)res.buf;
     local_ep.buf_rkey = res.mr->rkey;
 
-    printf("[信息] 本地端点: QP=%u, LID=%u, buf_addr=0x%lx, rkey=0x%x\n",
+    printf("[Info] Local endpoint: QP=%u, LID=%u, buf_addr=0x%lx, rkey=0x%x\n",
            local_ep.qp_num, local_ep.lid,
            (unsigned long)local_ep.buf_addr, local_ep.buf_rkey);
 
-    /* 3. TCP 交换端点信息 */
-    printf("\n[信息] 通过 TCP 交换连接信息 (端口 %d)...\n", TCP_PORT);
+    /* 3. TCP exchange endpoint info */
+    printf("\n[Info] Exchanging connection info via TCP (port %d)...\n", TCP_PORT);
     if (exchange_endpoint_tcp(server_ip, TCP_PORT, &local_ep, &remote_ep) != 0) {
-        fprintf(stderr, "[错误] TCP 信息交换失败\n");
+        fprintf(stderr, "[Error] TCP info exchange failed\n");
         cleanup_resources(&res);
         return 1;
     }
-    printf("[信息] 远端端点: QP=%u, LID=%u, buf_addr=0x%lx, rkey=0x%x\n",
+    printf("[Info] Remote endpoint: QP=%u, LID=%u, buf_addr=0x%lx, rkey=0x%x\n",
            remote_ep.qp_num, remote_ep.lid,
            (unsigned long)remote_ep.buf_addr, remote_ep.buf_rkey);
 
-    /* 4. Server: 在建连前先 post recv (QP 在 INIT 状态即可 post recv) */
-    /*    先做 INIT 转换 */
+    /* 4. Server: post recv before connection (QP can post recv in INIT state) */
+    /*    First do INIT transition */
     int access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ;
     if (qp_to_init(res.qp, res.port, access) != 0) {
-        fprintf(stderr, "[错误] QP RESET->INIT 失败\n");
+        fprintf(stderr, "[Error] QP RESET->INIT failed\n");
         cleanup_resources(&res);
         return 1;
     }
 
     if (is_server) {
-        /* Server: INIT 状态下 post recv，准备接收 imm_data 通知 */
+        /* Server: post recv in INIT state, ready to receive imm_data notification */
         if (server_post_recv(&res) != 0) {
             cleanup_resources(&res);
             return 1;
         }
     }
 
-    /* 5. QP 状态转换: INIT -> RTR -> RTS */
+    /* 5. QP state transition: INIT -> RTR -> RTS */
     if (qp_to_rtr(res.qp, &remote_ep, res.port, res.is_roce) != 0) {
-        fprintf(stderr, "[错误] QP INIT->RTR 失败\n");
+        fprintf(stderr, "[Error] QP INIT->RTR failed\n");
         cleanup_resources(&res);
         return 1;
     }
     if (qp_to_rts(res.qp) != 0) {
-        fprintf(stderr, "[错误] QP RTR->RTS 失败\n");
+        fprintf(stderr, "[Error] QP RTR->RTS failed\n");
         cleanup_resources(&res);
         return 1;
     }
-    printf("[信息] QP 状态: RESET -> INIT -> RTR -> RTS (就绪)\n\n");
+    printf("[Info] QP state: RESET -> INIT -> RTR -> RTS (ready)\n\n");
 
-    /* 6. 执行操作 */
+    /* 6. Execute operation */
     if (is_server) {
-        printf("[Server] 等待 Client 的 RDMA Write with Immediate...\n");
+        printf("[Server] Waiting for Client's RDMA Write with Immediate...\n");
         if (server_wait_imm(&res) != 0) {
-            fprintf(stderr, "[Server] 接收失败\n");
+            fprintf(stderr, "[Server] Receive failed\n");
         }
     } else {
-        /* Client: 向 Server 的 MR 执行 Write with Immediate */
+        /* Client: perform Write with Immediate to Server's MR */
         if (client_write_imm(&res, remote_ep.buf_addr, remote_ep.buf_rkey) != 0) {
-            fprintf(stderr, "[Client] 写入失败\n");
+            fprintf(stderr, "[Client] Write failed\n");
         }
     }
 
-    printf("\n[信息] 程序结束，清理资源...\n");
+    printf("\n[Info] Program finished, cleaning up resources...\n");
     cleanup_resources(&res);
     return 0;
 }

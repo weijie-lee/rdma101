@@ -1,22 +1,22 @@
 # ch07-engineering/02-tuning Makefile
 #
-# 编译三个性能调优演示程序:
-#   - inline_data:     Inline Data 优化对比
-#   - unsignaled_send: Unsignaled Completion 优化对比
-#   - srq_demo:        Shared Receive Queue 演示
+# Build three performance tuning demo programs:
+#   - inline_data:     Inline Data optimization comparison
+#   - unsignaled_send: Unsignaled Completion optimization comparison
+#   - srq_demo:        Shared Receive Queue demo
 
 CC = gcc
 CFLAGS = -Wall -O2 -g -I../../common
 LDFLAGS = -libverbs -L../../common -lrdma_utils
 
-# 公共工具库路径
+# Common utility library path
 COMMON_LIB = ../../common/librdma_utils.a
 
 TARGETS = inline_data unsignaled_send srq_demo
 
 all: $(COMMON_LIB) $(TARGETS)
 
-# 确保公共库已编译
+# Ensure common library is built
 $(COMMON_LIB):
 	$(MAKE) -C ../../common
 

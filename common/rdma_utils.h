@@ -1,14 +1,14 @@
 /**
- * RDMA 公共工具库 - 头文件
+ * RDMA Common Utility Library - Header File
  *
- * 提供 IB/RoCE 双模支持的统一抽象：
- *   - 传输层自动检测 (IB vs RoCE)
- *   - QP 状态转换 (支持 GID/LID 两种寻址)
- *   - TCP 带外信息交换
- *   - 设备/端口/GID 查询与打印
- *   - 错误处理宏
+ * Provides unified abstraction with IB/RoCE dual-mode support:
+ *   - Automatic transport layer detection (IB vs RoCE)
+ *   - QP state transitions (supports both GID/LID addressing)
+ *   - TCP out-of-band information exchange
+ *   - Device/port/GID query and printing
+ *   - Error handling macros
  *
- * 编译: 先编译本库 (make -C common)，再在其他程序中链接 librdma_utils.a
+ * Build: first compile this library (make -C common), then link librdma_utils.a in other programs
  */
 
 #ifndef RDMA_UTILS_H
@@ -22,252 +22,253 @@
 #include <arpa/inet.h>
 #include <infiniband/verbs.h>
 
-/* ========== 常量定义 ========== */
+/* ========== Constant Definitions ========== */
 
-#define RDMA_DEFAULT_PORT_NUM   1       /* 默认使用端口号 1 */
-#define RDMA_DEFAULT_GID_INDEX  0       /* 默认 GID 索引 (RoCE v2 通常用 1 或 3) */
-#define RDMA_DEFAULT_PSN        0       /* 默认 Packet Sequence Number */
-#define RDMA_DEFAULT_PKEY_INDEX 0       /* 默认 P_Key 索引 */
-#define RDMA_DEFAULT_SL         0       /* 默认 Service Level */
-#define RDMA_DEFAULT_MTU        IBV_MTU_1024  /* 默认 MTU */
+#define RDMA_DEFAULT_PORT_NUM   1       /* Default port number 1 */
+#define RDMA_DEFAULT_GID_INDEX  0       /* Default GID index (RoCE v2 typically uses 1 or 3) */
+#define RDMA_DEFAULT_PSN        0       /* Default Packet Sequence Number */
+#define RDMA_DEFAULT_PKEY_INDEX 0       /* Default P_Key index */
+#define RDMA_DEFAULT_SL         0       /* Default Service Level */
+#define RDMA_DEFAULT_MTU        IBV_MTU_1024  /* Default MTU */
 
-/* 传输层类型 */
+/* Transport layer type */
 enum rdma_transport {
-    RDMA_TRANSPORT_IB    = 0,   /* InfiniBand (使用 LID 寻址) */
-    RDMA_TRANSPORT_ROCE  = 1,   /* RoCE (使用 GID 寻址, is_global=1) */
+    RDMA_TRANSPORT_IB    = 0,   /* InfiniBand (uses LID addressing) */
+    RDMA_TRANSPORT_ROCE  = 1,   /* RoCE (uses GID addressing, is_global=1) */
     RDMA_TRANSPORT_IWARP = 2,   /* iWARP */
     RDMA_TRANSPORT_UNKNOWN = -1,
 };
 
-/* ========== 核心数据结构 ========== */
+/* ========== Core Data Structures ========== */
 
 /**
- * RDMA 端点信息 —— 建连时需要交换的所有信息
+ * RDMA endpoint information - all info needed for connection establishment
  *
- * 用于 TCP 带外信息交换。IB 模式用 lid 寻址，RoCE 模式用 gid 寻址。
+ * Used for TCP out-of-band info exchange. IB mode uses lid addressing,
+ * RoCE mode uses gid addressing.
  */
 struct rdma_endpoint {
-    uint32_t        qp_num;     /* QP 编号 */
-    uint16_t        lid;        /* 本地端口 LID (IB 模式) */
-    uint8_t         gid_index;  /* GID 表索引 (RoCE 模式) */
-    uint8_t         port_num;   /* 端口号 */
-    union ibv_gid   gid;        /* 全局标识符 (RoCE 模式) */
+    uint32_t        qp_num;     /* QP number */
+    uint16_t        lid;        /* Local port LID (IB mode) */
+    uint8_t         gid_index;  /* GID table index (RoCE mode) */
+    uint8_t         port_num;   /* Port number */
+    union ibv_gid   gid;        /* Global Identifier (RoCE mode) */
     uint32_t        psn;        /* Packet Sequence Number */
-    uint64_t        buf_addr;   /* 远端 MR 虚拟地址 (RDMA Read/Write 需要) */
-    uint32_t        buf_rkey;   /* 远端 MR 的 rkey (RDMA Read/Write 需要) */
+    uint64_t        buf_addr;   /* Remote MR virtual address (needed for RDMA Read/Write) */
+    uint32_t        buf_rkey;   /* Remote MR's rkey (needed for RDMA Read/Write) */
 };
 
-/* ========== 错误处理宏 ========== */
+/* ========== Error Handling Macros ========== */
 
 /**
- * CHECK_NULL - 检查指针是否为 NULL，失败则打印错误信息并跳转 cleanup
+ * CHECK_NULL - Check if pointer is NULL, print error and goto cleanup on failure
  *
- * 用法:
+ * Usage:
  *   pd = ibv_alloc_pd(ctx);
- *   CHECK_NULL(pd, "分配保护域失败");
+ *   CHECK_NULL(pd, "Failed to allocate Protection Domain");
  */
 #define CHECK_NULL(ptr, msg) do { \
     if (!(ptr)) { \
-        fprintf(stderr, "[错误] %s: %s (errno=%d: %s)\n", \
+        fprintf(stderr, "[Error] %s: %s (errno=%d: %s)\n", \
                 (msg), #ptr, errno, strerror(errno)); \
         goto cleanup; \
     } \
 } while (0)
 
 /**
- * CHECK_ERRNO - 检查返回值是否非零，失败则打印错误信息并跳转 cleanup
+ * CHECK_ERRNO - Check if return value is non-zero, print error and goto cleanup on failure
  *
- * 用法:
+ * Usage:
  *   ret = ibv_modify_qp(qp, &attr, mask);
- *   CHECK_ERRNO(ret, "QP INIT->RTR 转换失败");
+ *   CHECK_ERRNO(ret, "QP INIT->RTR transition failed");
  */
 #define CHECK_ERRNO(ret, msg) do { \
     if ((ret) != 0) { \
-        fprintf(stderr, "[错误] %s: 返回值=%d (errno=%d: %s)\n", \
+        fprintf(stderr, "[Error] %s: ret=%d (errno=%d: %s)\n", \
                 (msg), (ret), errno, strerror(errno)); \
         goto cleanup; \
     } \
 } while (0)
 
 /**
- * CHECK_ERRNO_RETURN - 同 CHECK_ERRNO 但直接返回错误码
+ * CHECK_ERRNO_RETURN - Same as CHECK_ERRNO but returns the error code directly
  */
 #define CHECK_ERRNO_RETURN(ret, msg) do { \
     if ((ret) != 0) { \
-        fprintf(stderr, "[错误] %s: 返回值=%d (errno=%d: %s)\n", \
+        fprintf(stderr, "[Error] %s: ret=%d (errno=%d: %s)\n", \
                 (msg), (ret), errno, strerror(errno)); \
         return (ret); \
     } \
 } while (0)
 
-/* ========== 传输层检测 ========== */
+/* ========== Transport Layer Detection ========== */
 
 /**
- * detect_transport - 检测指定端口的传输层类型
+ * detect_transport - Detect transport layer type of the specified port
  *
- * @ctx:  设备上下文
- * @port: 端口号 (通常为 1)
+ * @ctx:  Device context
+ * @port: Port number (usually 1)
  *
- * 返回: RDMA_TRANSPORT_IB / RDMA_TRANSPORT_ROCE / RDMA_TRANSPORT_UNKNOWN
+ * Returns: RDMA_TRANSPORT_IB / RDMA_TRANSPORT_ROCE / RDMA_TRANSPORT_UNKNOWN
  *
- * 原理: 通过 ibv_query_port() 的 link_layer 字段判断
- *   - IBV_LINK_LAYER_INFINIBAND → IB
- *   - IBV_LINK_LAYER_ETHERNET   → RoCE (或 iWARP，需进一步判断)
+ * Principle: Determined by the link_layer field from ibv_query_port()
+ *   - IBV_LINK_LAYER_INFINIBAND -> IB
+ *   - IBV_LINK_LAYER_ETHERNET   -> RoCE (or iWARP, requires further check)
  */
 enum rdma_transport detect_transport(struct ibv_context *ctx, uint8_t port);
 
 /**
- * transport_str - 将传输层类型转为可读字符串
+ * transport_str - Convert transport layer type to readable string
  */
 const char *transport_str(enum rdma_transport t);
 
-/* ========== 设备查询与打印 ========== */
+/* ========== Device Query and Printing ========== */
 
 /**
- * query_and_print_device - 查询并打印设备的全部能力参数
+ * query_and_print_device - Query and print all device capability parameters
  *
- * 使用 ibv_query_device() 打印: fw_ver, max_qp, max_cq, max_mr,
- * max_mr_size, max_sge, max_qp_wr, max_cqe, atomic_cap 等 ~20 个关键字段。
+ * Uses ibv_query_device() to print: fw_ver, max_qp, max_cq, max_mr,
+ * max_mr_size, max_sge, max_qp_wr, max_cqe, atomic_cap, etc. (~20 key fields).
  */
 int query_and_print_device(struct ibv_context *ctx);
 
 /**
- * query_and_print_port - 查询并打印端口的全部属性
+ * query_and_print_port - Query and print all port attributes
  *
- * 使用 ibv_query_port() 打印: state, max_mtu, active_mtu, lid,
- * sm_lid, gid_tbl_len, pkey_tbl_len, link_layer 等字段。
+ * Uses ibv_query_port() to print: state, max_mtu, active_mtu, lid,
+ * sm_lid, gid_tbl_len, pkey_tbl_len, link_layer, etc.
  */
 int query_and_print_port(struct ibv_context *ctx, uint8_t port);
 
 /**
- * query_and_print_all_gids - 遍历并打印指定端口的所有 GID 条目
+ * query_and_print_all_gids - Enumerate and print all GID entries for a port
  */
 int query_and_print_all_gids(struct ibv_context *ctx, uint8_t port);
 
 /**
- * print_gid - 格式化打印一个 GID (128-bit)
+ * print_gid - Format and print a GID (128-bit)
  *
- * 输出格式: fe80:0000:0000:0000:xxxx:xxxx:xxxx:xxxx
+ * Output format: fe80:0000:0000:0000:xxxx:xxxx:xxxx:xxxx
  */
 void print_gid(const union ibv_gid *gid);
 
 /**
- * gid_to_str - 将 GID 转为字符串 (IPv6 格式)
+ * gid_to_str - Convert GID to string (IPv6 format)
  *
- * @gid: 输入 GID
- * @buf: 输出缓冲区，至少 46 字节
+ * @gid: Input GID
+ * @buf: Output buffer, at least 46 bytes
  */
 void gid_to_str(const union ibv_gid *gid, char *buf, size_t buflen);
 
-/* ========== QP 状态转换 ========== */
+/* ========== QP State Transitions ========== */
 
 /**
- * qp_to_init - 将 QP 从 RESET 转到 INIT
+ * qp_to_init - Transition QP from RESET to INIT
  *
- * @qp:           队列对
- * @port:         端口号
- * @access_flags: 远端访问权限 (IBV_ACCESS_* 组合)
+ * @qp:           Queue Pair
+ * @port:         Port number
+ * @access_flags: Remote access permissions (IBV_ACCESS_* combination)
  */
 int qp_to_init(struct ibv_qp *qp, uint8_t port, int access_flags);
 
 /**
- * qp_to_rtr - 将 QP 从 INIT 转到 RTR (Ready to Receive)
+ * qp_to_rtr - Transition QP from INIT to RTR (Ready to Receive)
  *
- * 自动根据 is_roce 参数选择寻址方式:
- *   - IB:   使用 remote->lid 设置 ah_attr.dlid
- *   - RoCE: 使用 remote->gid 设置 ah_attr.is_global=1 + grh.dgid
+ * Automatically selects addressing mode based on is_roce parameter:
+ *   - IB:   Uses remote->lid to set ah_attr.dlid
+ *   - RoCE: Uses remote->gid to set ah_attr.is_global=1 + grh.dgid
  *
- * @qp:      队列对
- * @remote:  对端端点信息
- * @port:    本地端口号
- * @is_roce: 是否为 RoCE 模式
+ * @qp:      Queue Pair
+ * @remote:  Remote endpoint information
+ * @port:    Local port number
+ * @is_roce: Whether in RoCE mode
  */
 int qp_to_rtr(struct ibv_qp *qp, const struct rdma_endpoint *remote,
               uint8_t port, int is_roce);
 
 /**
- * qp_to_rts - 将 QP 从 RTR 转到 RTS (Ready to Send)
+ * qp_to_rts - Transition QP from RTR to RTS (Ready to Send)
  */
 int qp_to_rts(struct ibv_qp *qp);
 
 /**
- * qp_to_reset - 将 QP 重置到 RESET 状态 (用于错误恢复)
+ * qp_to_reset - Reset QP to RESET state (for error recovery)
  */
 int qp_to_reset(struct ibv_qp *qp);
 
 /**
- * qp_full_connect - 一键完成 RESET→INIT→RTR→RTS 全部转换
+ * qp_full_connect - One-call complete RESET->INIT->RTR->RTS transition
  *
- * @qp:           队列对
- * @remote:       对端端点信息
- * @port:         本地端口号
- * @is_roce:      是否为 RoCE 模式
- * @access_flags: 远端访问权限
+ * @qp:           Queue Pair
+ * @remote:       Remote endpoint information
+ * @port:         Local port number
+ * @is_roce:      Whether in RoCE mode
+ * @access_flags: Remote access permissions
  */
 int qp_full_connect(struct ibv_qp *qp, const struct rdma_endpoint *remote,
                     uint8_t port, int is_roce, int access_flags);
 
 /**
- * print_qp_state - 查询并打印 QP 的当前状态
+ * print_qp_state - Query and print QP's current state
  */
 void print_qp_state(struct ibv_qp *qp);
 
 /**
- * qp_state_str - 将 QP 状态枚举值转为可读字符串
+ * qp_state_str - Convert QP state enum to readable string
  */
 const char *qp_state_str(enum ibv_qp_state state);
 
-/* ========== TCP 带外信息交换 ========== */
+/* ========== TCP Out-of-Band Information Exchange ========== */
 
 /**
- * exchange_endpoint_tcp - 通过 TCP socket 交换 RDMA 端点信息
+ * exchange_endpoint_tcp - Exchange RDMA endpoint info via TCP socket
  *
- * @server_ip: 服务器 IP。NULL 表示本端作为服务器监听。
- * @tcp_port:  TCP 端口号
- * @local:     本地端点信息 (输入)
- * @remote:    对端端点信息 (输出)
+ * @server_ip: Server IP. NULL means this side acts as server (listen).
+ * @tcp_port:  TCP port number
+ * @local:     Local endpoint info (input)
+ * @remote:    Remote endpoint info (output)
  *
- * 返回: 0 成功, -1 失败
+ * Returns: 0 on success, -1 on failure
  */
 int exchange_endpoint_tcp(const char *server_ip, int tcp_port,
                           const struct rdma_endpoint *local,
                           struct rdma_endpoint *remote);
 
-/* ========== WC 完成事件处理 ========== */
+/* ========== WC Completion Event Handling ========== */
 
 /**
- * print_wc_detail - 打印 Work Completion 的完整字段信息
+ * print_wc_detail - Print all fields of a Work Completion
  *
- * 包括: wr_id, status (文字描述), opcode, byte_len, qp_num,
- *       src_qp, imm_data (如有), vendor_err
+ * Includes: wr_id, status (text description), opcode, byte_len, qp_num,
+ *           src_qp, imm_data (if present), vendor_err
  */
 void print_wc_detail(const struct ibv_wc *wc);
 
 /**
- * wc_opcode_str - 将 WC opcode 转为可读字符串
+ * wc_opcode_str - Convert WC opcode to readable string
  */
 const char *wc_opcode_str(enum ibv_wc_opcode opcode);
 
 /**
- * poll_cq_blocking - 阻塞轮询 CQ 直到收到一个完成事件
+ * poll_cq_blocking - Block-poll CQ until one completion event is received
  *
- * @cq:  完成队列
- * @wc:  输出的完成事件
+ * @cq:  Completion Queue
+ * @wc:  Output completion event
  *
- * 返回: 0 成功, -1 失败 (含打印错误信息)
+ * Returns: 0 on success, -1 on failure (with error message printed)
  */
 int poll_cq_blocking(struct ibv_cq *cq, struct ibv_wc *wc);
 
-/* ========== 端点信息填充辅助 ========== */
+/* ========== Endpoint Info Fill Helper ========== */
 
 /**
- * fill_local_endpoint - 填充本地端点信息
+ * fill_local_endpoint - Fill local endpoint information
  *
- * @ctx:      设备上下文
- * @qp:       本地 QP
- * @port:     端口号
- * @gid_index: GID 索引
- * @ep:       输出的端点信息
+ * @ctx:      Device context
+ * @qp:       Local QP
+ * @port:     Port number
+ * @gid_index: GID index
+ * @ep:       Output endpoint info
  */
 int fill_local_endpoint(struct ibv_context *ctx, struct ibv_qp *qp,
                         uint8_t port, int gid_index,

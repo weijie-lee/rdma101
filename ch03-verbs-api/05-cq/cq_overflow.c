@@ -1,14 +1,14 @@
 /**
- * CQ 溢出 (Overflow) 演示
+ * CQ Overflow Demo
  *
- * 本程序演示当 CQ 被填满后继续产生完成事件会发生什么:
- *   1. 创建非常小的 CQ (深度=2)
- *   2. 快速提交多个 Send WR, 产生大量完成事件
- *   3. 不及时 poll CQ, 导致 CQ 溢出
- *   4. 捕获并打印溢出错误
- *   5. 解释生产环境中如何避免 (合理 CQ 大小、及时轮询)
+ * This program demonstrates what happens when CQ is full and more completion events are generated:
+ *   1. Create a very small CQ (depth=2)
+ *   2. Rapidly submit multiple Send WRs, generating a large number of completion events
+ *   3. Intentionally do not poll CQ, causing CQ overflow
+ *   4. Capture and print overflow errors
+ *   5. Explain how to avoid this in production (proper CQ sizing, timely polling)
  *
- * 编译: gcc -o cq_overflow cq_overflow.c -I../../common ../../common/librdma_utils.a -libverbs
+ * Compile: gcc -o cq_overflow cq_overflow.c -I../../common ../../common/librdma_utils.a -libverbs
  */
 
 #include <stdio.h>
@@ -24,20 +24,20 @@
 #define MSG_SIZE    64
 
 /*
- * 注意: CQ 的最小深度由硬件决定, 有些 HCA 会将很小的值向上取整。
- * 例如请求 cq_depth=2, 实际可能分配 16 或更多。
- * 我们尽量请求最小值, 然后尽力触发溢出。
+ * Note: The minimum CQ depth is determined by hardware; some HCAs will round up
+ * very small values. For example, requesting cq_depth=2 may actually allocate 16 or more.
+ * We request the smallest value possible, then try our best to trigger overflow.
  */
 #define SMALL_CQ_DEPTH  2
-#define NUM_WR_TO_POST  32    /* 尝试提交的 WR 数量 (远超 CQ 深度) */
+#define NUM_WR_TO_POST  32    /* Number of WRs to submit (far exceeding CQ depth) */
 
 int main(int argc, char *argv[])
 {
-    /* 资源声明 */
+    /* Resource declarations */
     struct ibv_device **dev_list = NULL;
     struct ibv_context *ctx      = NULL;
     struct ibv_pd      *pd       = NULL;
-    struct ibv_cq      *cq_small = NULL;   /* 很小的 CQ */
+    struct ibv_cq      *cq_small = NULL;   /* Very small CQ */
     struct ibv_qp      *qp       = NULL;
     struct ibv_mr      *mr       = NULL;
     char               *buffer   = NULL;
@@ -46,53 +46,54 @@ int main(int argc, char *argv[])
     int                 i;
 
     printf("============================================\n");
-    printf("  CQ 溢出 (Overflow) 演示\n");
+    printf("  CQ Overflow Demo\n");
     printf("============================================\n\n");
 
-    printf("  实验设计:\n");
-    printf("  - 创建非常小的 CQ (请求深度=%d)\n", SMALL_CQ_DEPTH);
-    printf("  - 提交 %d 个 Send WR (全部 SIGNALED)\n", NUM_WR_TO_POST);
-    printf("  - 故意不 poll CQ, 导致 CQ 溢出\n");
-    printf("  - 观察溢出时的错误现象\n\n");
+    printf("  Experiment design:\n");
+    printf("  - Create a very small CQ (requested depth=%d)\n", SMALL_CQ_DEPTH);
+    printf("  - Submit %d Send WRs (all SIGNALED)\n", NUM_WR_TO_POST);
+    printf("  - Intentionally do not poll CQ, causing CQ overflow\n");
+    printf("  - Observe overflow behavior\n\n");
 
-    /* ========== 初始化资源 ========== */
-    printf("[步骤1] 初始化 RDMA 资源\n");
+    /* ========== Initialize resources ========== */
+    printf("[Step 1] Initialize RDMA resources\n");
     dev_list = ibv_get_device_list(&num_devices);
-    CHECK_NULL(dev_list, "获取设备列表失败");
+    CHECK_NULL(dev_list, "Failed to get device list");
     if (num_devices == 0) {
-        fprintf(stderr, "[错误] 未发现 RDMA 设备\n");
+        fprintf(stderr, "[Error] No RDMA devices found\n");
         goto cleanup;
     }
     ctx = ibv_open_device(dev_list[0]);
-    CHECK_NULL(ctx, "打开设备失败");
-    printf("  设备: %s\n", ibv_get_device_name(dev_list[0]));
+    CHECK_NULL(ctx, "Failed to open device");
+    printf("  Device: %s\n", ibv_get_device_name(dev_list[0]));
 
     pd = ibv_alloc_pd(ctx);
-    CHECK_NULL(pd, "分配 PD 失败");
+    CHECK_NULL(pd, "Failed to allocate PD");
 
     buffer = malloc(BUFFER_SIZE);
-    CHECK_NULL(buffer, "malloc 失败");
+    CHECK_NULL(buffer, "malloc failed");
     memset(buffer, 0, BUFFER_SIZE);
 
     mr = ibv_reg_mr(pd, buffer, BUFFER_SIZE,
                      IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
-    CHECK_NULL(mr, "注册 MR 失败");
-    printf("  PD, MR 创建完成\n\n");
+    CHECK_NULL(mr, "Failed to register MR");
+    printf("  PD, MR created\n\n");
 
-    /* ========== 步骤 2: 创建小 CQ ========== */
-    printf("[步骤2] 创建极小 CQ (请求深度=%d)\n", SMALL_CQ_DEPTH);
+    /* ========== Step 2: Create small CQ ========== */
+    printf("[Step 2] Create very small CQ (requested depth=%d)\n", SMALL_CQ_DEPTH);
 
     /*
-     * ibv_create_cq() 的 cqe 参数是最小保证值, HCA 可能实际分配更多。
-     * 通过 cq->cqe 可以查看实际分配的大小。
+     * The cqe parameter of ibv_create_cq() is a minimum guaranteed value;
+     * the HCA may actually allocate more.
+     * The actual allocated size can be checked via cq->cqe.
      */
     cq_small = ibv_create_cq(ctx, SMALL_CQ_DEPTH, NULL, NULL, 0);
-    CHECK_NULL(cq_small, "创建小 CQ 失败");
-    printf("  请求深度: %d, 实际分配深度: %d\n", SMALL_CQ_DEPTH, cq_small->cqe);
-    printf("  → 注意: 实际深度可能大于请求值 (硬件对齐)\n\n");
+    CHECK_NULL(cq_small, "Failed to create small CQ");
+    printf("  Requested depth: %d, actual allocated depth: %d\n", SMALL_CQ_DEPTH, cq_small->cqe);
+    printf("  -> Note: Actual depth may be larger than requested (hardware alignment)\n\n");
 
-    /* ========== 步骤 3: 创建 QP 并 loopback 连接 ========== */
-    printf("[步骤3] 创建 QP 并建立 loopback 连接\n");
+    /* ========== Step 3: Create QP and loopback connect ========== */
+    printf("[Step 3] Create QP and establish loopback connection\n");
 
     struct ibv_qp_init_attr qp_init = {
         .send_cq = cq_small,
@@ -106,13 +107,13 @@ int main(int argc, char *argv[])
         },
     };
     qp = ibv_create_qp(pd, &qp_init);
-    CHECK_NULL(qp, "创建 QP 失败");
-    printf("  QP 创建成功, qp_num=%u\n", qp->qp_num);
+    CHECK_NULL(qp, "Failed to create QP");
+    printf("  QP created successfully, qp_num=%u\n", qp->qp_num);
 
-    /* loopback 连接 */
+    /* loopback connection */
     struct rdma_endpoint local_ep;
     ret = fill_local_endpoint(ctx, qp, PORT_NUM, RDMA_DEFAULT_GID_INDEX, &local_ep);
-    CHECK_ERRNO(ret, "填充端点信息失败");
+    CHECK_ERRNO(ret, "Failed to fill endpoint info");
 
     enum rdma_transport transport = detect_transport(ctx, PORT_NUM);
     int is_roce = (transport == RDMA_TRANSPORT_ROCE);
@@ -120,13 +121,13 @@ int main(int argc, char *argv[])
     int access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE;
     ret = qp_full_connect(qp, &local_ep, PORT_NUM, is_roce, access);
     if (ret != 0) {
-        printf("  QP 连接失败, 跳过溢出测试\n");
+        printf("  QP connection failed, skipping overflow test\n");
         goto cleanup;
     }
-    printf("  QP 已连接 (loopback, RTS 状态)\n\n");
+    printf("  QP connected (loopback, RTS state)\n\n");
 
-    /* ========== 步骤 4: 先 post recv 准备接收 ========== */
-    printf("[步骤4] Post Recv 准备接收缓冲区\n");
+    /* ========== Step 4: Post recv to prepare receive buffers ========== */
+    printf("[Step 4] Post Recv to prepare receive buffers\n");
     for (i = 0; i < NUM_WR_TO_POST; i++) {
         struct ibv_sge recv_sge = {
             .addr   = (uintptr_t)(buffer + (i % 8) * MSG_SIZE),
@@ -141,14 +142,14 @@ int main(int argc, char *argv[])
         struct ibv_recv_wr *bad_recv = NULL;
         ret = ibv_post_recv(qp, &recv_wr, &bad_recv);
         if (ret != 0) {
-            printf("  post_recv[%d] 失败: %s\n", i, strerror(errno));
+            printf("  post_recv[%d] failed: %s\n", i, strerror(errno));
             break;
         }
     }
-    printf("  已提交 %d 个 Recv WR\n\n", i);
+    printf("  Submitted %d Recv WRs\n\n", i);
 
-    /* ========== 步骤 5: 快速提交大量 Send WR (不 poll CQ!) ========== */
-    printf("[步骤5] 快速提交 %d 个 Send WR (全部 SIGNALED, 不 poll CQ)\n", NUM_WR_TO_POST);
+    /* ========== Step 5: Rapidly submit many Send WRs (without polling CQ!) ========== */
+    printf("[Step 5] Rapidly submit %d Send WRs (all SIGNALED, without polling CQ)\n", NUM_WR_TO_POST);
     printf("========================================\n");
 
     int posted = 0;
@@ -163,27 +164,27 @@ int main(int argc, char *argv[])
             .sg_list    = &sge,
             .num_sge    = 1,
             .opcode     = IBV_WR_SEND,
-            .send_flags = IBV_SEND_SIGNALED,  /* 每个都请求完成通知 */
+            .send_flags = IBV_SEND_SIGNALED,  /* Each one requests completion notification */
         };
         struct ibv_send_wr *bad_wr = NULL;
 
         ret = ibv_post_send(qp, &wr, &bad_wr);
         if (ret != 0) {
-            printf("  post_send[%d] 失败: errno=%d (%s)\n", i, errno, strerror(errno));
-            printf("  → 可能因为 Send Queue 已满 (与 CQ 溢出不同)\n");
+            printf("  post_send[%d] failed: errno=%d (%s)\n", i, errno, strerror(errno));
+            printf("  -> May be because Send Queue is full (different from CQ overflow)\n");
             break;
         }
         posted++;
     }
-    printf("  成功提交 %d 个 Send WR\n", posted);
-    printf("  CQ 深度=%d, 但会产生 %d 个完成事件 (send + recv)\n",
+    printf("  Successfully submitted %d Send WRs\n", posted);
+    printf("  CQ depth=%d, but will generate %d completion events (send + recv)\n",
            cq_small->cqe, posted * 2);
 
-    /* 等待一小段时间让 HCA 处理 */
+    /* Wait a short time for HCA to process */
     usleep(100000);  /* 100ms */
 
-    /* ========== 步骤 6: 尝试 poll CQ, 观察溢出 ========== */
-    printf("\n[步骤6] 尝试 poll CQ, 观察溢出效果\n");
+    /* ========== Step 6: Try to poll CQ, observe overflow ========== */
+    printf("\n[Step 6] Try to poll CQ, observe overflow effect\n");
     printf("========================================\n");
 
     struct ibv_wc wc;
@@ -191,12 +192,12 @@ int main(int argc, char *argv[])
     int success_count = 0;
     int error_count = 0;
 
-    /* 尝试 poll 所有完成事件 */
+    /* Try to poll all completion events */
     while ((ne = ibv_poll_cq(cq_small, 1, &wc)) != 0) {
         if (ne < 0) {
-            printf("  ✗ ibv_poll_cq 返回 %d — CQ 可能已溢出!\n", ne);
-            printf("  → CQ overflow: 当 CQ 满了，HCA 无法写入新的 CQE\n");
-            printf("  → 关联的 QP 会被移到 ERROR 状态\n");
+            printf("  ibv_poll_cq returned %d -- CQ may have overflowed!\n", ne);
+            printf("  -> CQ overflow: When CQ is full, HCA cannot write new CQEs\n");
+            printf("  -> Associated QP will be moved to ERROR state\n");
             error_count++;
             break;
         }
@@ -204,60 +205,60 @@ int main(int argc, char *argv[])
             success_count++;
         } else {
             error_count++;
-            printf("  WC 错误: wr_id=%lu, status=%s (%d), vendor_err=0x%x\n",
+            printf("  WC error: wr_id=%lu, status=%s (%d), vendor_err=0x%x\n",
                    (unsigned long)wc.wr_id,
                    ibv_wc_status_str(wc.status), wc.status,
                    wc.vendor_err);
 
             /*
-             * CQ 溢出时, QP 会被移到 ERROR 状态。
-             * 后续的 WC 可能显示:
-             *   - IBV_WC_WR_FLUSH_ERR: QP 进入 ERROR 后，未完成的 WR 被 flush
-             *   - IBV_WC_GENERAL_ERR: 一般错误
+             * When CQ overflows, QP is moved to ERROR state.
+             * Subsequent WCs may show:
+             *   - IBV_WC_WR_FLUSH_ERR: After QP enters ERROR, outstanding WRs are flushed
+             *   - IBV_WC_GENERAL_ERR: General error
              */
             if (wc.status == IBV_WC_WR_FLUSH_ERR) {
-                printf("  → WR Flush Error: QP 已进入 ERROR 状态, WR 被冲刷\n");
+                printf("  -> WR Flush Error: QP has entered ERROR state, WRs are flushed\n");
             }
         }
     }
 
-    printf("\n  结果: 成功完成=%d, 错误完成=%d\n", success_count, error_count);
+    printf("\n  Result: successful completions=%d, error completions=%d\n", success_count, error_count);
 
-    /* 检查 QP 当前状态 */
-    printf("\n  检查 QP 状态:\n");
+    /* Check current QP state */
+    printf("\n  Check QP state:\n");
     print_qp_state(qp);
 
     if (error_count > 0) {
-        printf("\n  ✓ 观察到 CQ 溢出效果!\n");
-        printf("  → 当 CQ 满了, HCA 无法写入新的 CQE\n");
-        printf("  → QP 被移到 ERROR 状态, 所有后续 WR 被 flush\n");
+        printf("\n  Observed CQ overflow effect!\n");
+        printf("  -> When CQ is full, HCA cannot write new CQEs\n");
+        printf("  -> QP is moved to ERROR state, all subsequent WRs are flushed\n");
     } else if (success_count == posted * 2) {
-        printf("\n  所有 WC 都成功了 (实际 CQ 深度足够大: %d)\n", cq_small->cqe);
-        printf("  → 硬件实际分配的 CQ 深度 >= %d, 未溢出\n", posted * 2);
-        printf("  → 要触发溢出, 需要提交更多 WR 或使用支持更小 CQ 的硬件\n");
+        printf("\n  All WCs succeeded (actual CQ depth is large enough: %d)\n", cq_small->cqe);
+        printf("  -> Hardware actual CQ depth >= %d, no overflow\n", posted * 2);
+        printf("  -> To trigger overflow, need to submit more WRs or use hardware with smaller CQ support\n");
     }
 
-    /* ========== 总结 ========== */
+    /* ========== Summary ========== */
     printf("\n============================================\n");
-    printf("  CQ 溢出预防指南\n");
+    printf("  CQ Overflow Prevention Guide\n");
     printf("============================================\n");
-    printf("  1. CQ 大小规划:\n");
-    printf("     - CQ 深度 >= 关联的所有 QP 的 send_wr + recv_wr 总和\n");
-    printf("     - 公式: cq_depth >= N_qp * (max_send_wr + max_recv_wr)\n");
-    printf("     - 留出余量 (通常 2x)\n\n");
-    printf("  2. 及时 Poll CQ:\n");
-    printf("     - 忙轮询: 持续调用 ibv_poll_cq()\n");
-    printf("     - 事件驱动: 收到通知后立即 poll 到空\n");
-    printf("     - 批量 poll: ibv_poll_cq(cq, batch_size, wc_array)\n\n");
-    printf("  3. 使用 Shared Receive Queue (SRQ):\n");
-    printf("     - 多个 QP 共享接收队列, 减少总 WR 数量\n\n");
-    printf("  4. 信号选择 (Selective Signaling):\n");
-    printf("     - 并非每个 WR 都需要完成通知\n");
-    printf("     - 去掉 IBV_SEND_SIGNALED, 每 N 个 WR 只 signal 一个\n");
-    printf("     - 大幅减少 CQ 压力\n\n");
+    printf("  1. CQ size planning:\n");
+    printf("     - CQ depth >= total send_wr + recv_wr of all associated QPs\n");
+    printf("     - Formula: cq_depth >= N_qp * (max_send_wr + max_recv_wr)\n");
+    printf("     - Leave headroom (typically 2x)\n\n");
+    printf("  2. Poll CQ promptly:\n");
+    printf("     - Busy polling: continuously call ibv_poll_cq()\n");
+    printf("     - Event-driven: poll until empty immediately after notification\n");
+    printf("     - Batch poll: ibv_poll_cq(cq, batch_size, wc_array)\n\n");
+    printf("  3. Use Shared Receive Queue (SRQ):\n");
+    printf("     - Multiple QPs share a receive queue, reducing total WR count\n\n");
+    printf("  4. Selective Signaling:\n");
+    printf("     - Not every WR needs a completion notification\n");
+    printf("     - Remove IBV_SEND_SIGNALED, signal only every N WRs\n");
+    printf("     - Greatly reduces CQ pressure\n\n");
 
 cleanup:
-    printf("[清理] 释放资源...\n");
+    printf("[Cleanup] Releasing resources...\n");
     if (qp)       ibv_destroy_qp(qp);
     if (cq_small) ibv_destroy_cq(cq_small);
     if (mr)       ibv_dereg_mr(mr);
@@ -266,6 +267,6 @@ cleanup:
     if (ctx)      ibv_close_device(ctx);
     if (dev_list) ibv_free_device_list(dev_list);
 
-    printf("  完成\n");
+    printf("  Done\n");
     return 0;
 }

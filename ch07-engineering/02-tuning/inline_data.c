@@ -1,24 +1,24 @@
 /**
- * Inline Data 优化对比实验
+ * Inline Data Optimization Comparison Experiment
  *
- * 演示 Inline Data 优化技术：
- *   - 查询设备的 max_inline_data 能力
- *   - 对比普通 DMA 发送 vs Inline 发送的性能差异
- *   - Loopback 模式运行，无需两台机器
+ * Demonstrates Inline Data optimization technique:
+ *   - Queries the device's max_inline_data capability
+ *   - Compares performance of normal DMA send vs Inline send
+ *   - Runs in loopback mode, no need for two machines
  *
- * 原理：
- *   普通发送路径: CPU 填写 WQE(含数据地址) → NIC 通过 DMA 读取数据 → NIC 发送
- *   Inline 路径:  CPU 将数据拷贝到 WQE 中   → NIC 直接从 WQE 取数据发送 (省一次 DMA)
+ * Principle:
+ *   Normal send path: CPU fills WQE(with data address) -> NIC reads data via DMA -> NIC sends
+ *   Inline path:      CPU copies data into WQE         -> NIC takes data directly from WQE (saves one DMA)
  *
- *   对于小消息 (< max_inline_data)，Inline 可以显著降低延迟，因为：
- *   1. 少一次 PCIe DMA 读取往返
- *   2. 不需要 lkey (数据已在 WQE 中)
+ *   For small messages (< max_inline_data), Inline can significantly reduce latency because:
+ *   1. One fewer PCIe DMA read round-trip
+ *   2. No lkey needed (data is already in the WQE)
  *
- * 编译:
+ * Build:
  *   gcc -o inline_data inline_data.c -libverbs \
  *       -L../../common -lrdma_utils -I../../common -O2
  *
- * 运行: ./inline_data
+ * Run: ./inline_data
  */
 
 #include <stdio.h>
@@ -29,15 +29,15 @@
 #include <infiniband/verbs.h>
 #include "rdma_utils.h"
 
-/* ========== 常量定义 ========== */
-#define MSG_SIZE        32          /* 消息大小 (字节), 适合 inline */
-#define NUM_MESSAGES    1000        /* 每轮测试发送的消息数 */
-#define BUFFER_SIZE     4096        /* 缓冲区大小 */
-#define CQ_DEPTH        256         /* CQ 深度 */
-#define MAX_SEND_WR     128         /* SQ 最大 WR 数 */
-#define MAX_RECV_WR     128         /* RQ 最大 WR 数 */
+/* ========== Constant Definitions ========== */
+#define MSG_SIZE        32          /* Message size (bytes), suitable for inline */
+#define NUM_MESSAGES    1000        /* Number of messages per test round */
+#define BUFFER_SIZE     4096        /* Buffer size */
+#define CQ_DEPTH        256         /* CQ depth */
+#define MAX_SEND_WR     128         /* SQ maximum WR count */
+#define MAX_RECV_WR     128         /* RQ maximum WR count */
 
-/* ========== 获取高精度时间 (纳秒) ========== */
+/* ========== Get High-Precision Time (nanoseconds) ========== */
 static uint64_t get_time_ns(void)
 {
     struct timespec ts;
@@ -45,7 +45,7 @@ static uint64_t get_time_ns(void)
     return (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
 }
 
-/* ========== 批量发布 recv WR ========== */
+/* ========== Batch Post Recv WRs ========== */
 static int post_recvs(struct ibv_qp *qp, struct ibv_mr *mr,
                       char *buf, int count)
 {
@@ -53,7 +53,7 @@ static int post_recvs(struct ibv_qp *qp, struct ibv_mr *mr,
     struct ibv_sge sge;
     int i, ret;
 
-    /* 为每条消息发布一个 recv WR */
+    /* Post one recv WR for each message */
     for (i = 0; i < count; i++) {
         memset(&sge, 0, sizeof(sge));
         sge.addr   = (uint64_t)(buf + (i % 4) * MSG_SIZE);
@@ -68,14 +68,14 @@ static int post_recvs(struct ibv_qp *qp, struct ibv_mr *mr,
 
         ret = ibv_post_recv(qp, &wr, &bad_wr);
         if (ret != 0) {
-            fprintf(stderr, "[错误] post_recv #%d 失败: errno=%d\n", i, ret);
+            fprintf(stderr, "[Error] post_recv #%d failed: errno=%d\n", i, ret);
             return -1;
         }
     }
     return 0;
 }
 
-/* ========== 普通发送 (DMA 路径) ========== */
+/* ========== Normal Send (DMA Path) ========== */
 static int send_normal(struct ibv_qp *qp, struct ibv_cq *cq,
                        struct ibv_mr *mr, char *buf, int count)
 {
@@ -85,34 +85,34 @@ static int send_normal(struct ibv_qp *qp, struct ibv_cq *cq,
     int i, ret;
 
     for (i = 0; i < count; i++) {
-        /* 构建 SGE: 指向已注册的内存区域 */
+        /* Build SGE: points to registered memory region */
         memset(&sge, 0, sizeof(sge));
         sge.addr   = (uint64_t)buf;
         sge.length = MSG_SIZE;
-        sge.lkey   = mr->lkey;      /* 普通发送需要 lkey */
+        sge.lkey   = mr->lkey;      /* Normal send requires lkey */
 
-        /* 构建 Send WR: 不使用 IBV_SEND_INLINE */
+        /* Build Send WR: does not use IBV_SEND_INLINE */
         memset(&wr, 0, sizeof(wr));
         wr.wr_id      = i;
         wr.sg_list    = &sge;
         wr.num_sge    = 1;
         wr.opcode     = IBV_WR_SEND;
-        wr.send_flags = IBV_SEND_SIGNALED;  /* 每条都产生 CQE */
+        wr.send_flags = IBV_SEND_SIGNALED;  /* Each one generates CQE */
 
         ret = ibv_post_send(qp, &wr, &bad_wr);
         if (ret != 0) {
-            fprintf(stderr, "[错误] 普通 post_send #%d 失败: errno=%d\n", i, ret);
+            fprintf(stderr, "[Error] Normal post_send #%d failed: errno=%d\n", i, ret);
             return -1;
         }
 
-        /* 等待发送完成 */
+        /* Wait for send completion */
         ret = poll_cq_blocking(cq, &wc);
         if (ret != 0) return -1;
     }
     return 0;
 }
 
-/* ========== Inline 发送 (数据嵌入 WQE) ========== */
+/* ========== Inline Send (Data Embedded in WQE) ========== */
 static int send_inline(struct ibv_qp *qp, struct ibv_cq *cq,
                        char *buf, int count)
 {
@@ -123,37 +123,37 @@ static int send_inline(struct ibv_qp *qp, struct ibv_cq *cq,
 
     for (i = 0; i < count; i++) {
         /*
-         * Inline 发送: sge 中的数据会被直接拷贝到 WQE
-         * 注意: lkey 可以设为 0，因为 NIC 不需要 DMA 读取数据
-         *       但实践中设置 lkey 也不影响正确性
+         * Inline send: data in sge is directly copied into the WQE
+         * Note: lkey can be set to 0, because NIC doesn't need to DMA read data
+         *       In practice, setting lkey doesn't affect correctness
          */
         memset(&sge, 0, sizeof(sge));
         sge.addr   = (uint64_t)buf;
         sge.length = MSG_SIZE;
-        sge.lkey   = 0;            /* Inline 模式不需要 lkey! */
+        sge.lkey   = 0;            /* Inline mode doesn't need lkey! */
 
-        /* 构建 Send WR: 使用 IBV_SEND_INLINE 标志 */
+        /* Build Send WR: use IBV_SEND_INLINE flag */
         memset(&wr, 0, sizeof(wr));
         wr.wr_id      = i;
         wr.sg_list    = &sge;
         wr.num_sge    = 1;
         wr.opcode     = IBV_WR_SEND;
-        wr.send_flags = IBV_SEND_SIGNALED | IBV_SEND_INLINE;  /* 关键! */
+        wr.send_flags = IBV_SEND_SIGNALED | IBV_SEND_INLINE;  /* Key! */
 
         ret = ibv_post_send(qp, &wr, &bad_wr);
         if (ret != 0) {
-            fprintf(stderr, "[错误] inline post_send #%d 失败: errno=%d\n", i, ret);
+            fprintf(stderr, "[Error] Inline post_send #%d failed: errno=%d\n", i, ret);
             return -1;
         }
 
-        /* 等待发送完成 */
+        /* Wait for send completion */
         ret = poll_cq_blocking(cq, &wc);
         if (ret != 0) return -1;
     }
     return 0;
 }
 
-/* ========== 消费接收侧 CQ ========== */
+/* ========== Drain Receive-Side CQ ========== */
 static int drain_recv_cq(struct ibv_cq *cq, int count)
 {
     struct ibv_wc wc;
@@ -162,17 +162,17 @@ static int drain_recv_cq(struct ibv_cq *cq, int count)
     for (i = 0; i < count; i++) {
         ret = poll_cq_blocking(cq, &wc);
         if (ret != 0) {
-            fprintf(stderr, "[错误] drain_recv_cq #%d 失败\n", i);
+            fprintf(stderr, "[Error] drain_recv_cq #%d failed\n", i);
             return -1;
         }
     }
     return 0;
 }
 
-/* ========== 主函数 ========== */
+/* ========== Main Function ========== */
 int main(int argc, char *argv[])
 {
-    /* RDMA 资源 */
+    /* RDMA resources */
     struct ibv_device **dev_list = NULL;
     struct ibv_context *ctx = NULL;
     struct ibv_pd *pd = NULL;
@@ -183,62 +183,62 @@ int main(int argc, char *argv[])
     int num_devices, ret;
     int is_roce;
 
-    printf("=== Inline Data 优化对比实验 ===\n\n");
+    printf("=== Inline Data Optimization Comparison Experiment ===\n\n");
 
-    /* ---- 步骤 1: 打开设备 ---- */
+    /* ---- Step 1: Open device ---- */
     dev_list = ibv_get_device_list(&num_devices);
-    CHECK_NULL(dev_list, "获取设备列表失败");
+    CHECK_NULL(dev_list, "Failed to get device list");
     if (num_devices == 0) {
-        fprintf(stderr, "[错误] 未找到 RDMA 设备\n");
+        fprintf(stderr, "[Error] No RDMA devices found\n");
         goto cleanup;
     }
 
     ctx = ibv_open_device(dev_list[0]);
-    CHECK_NULL(ctx, "打开设备失败");
-    printf("[1] 打开设备: %s\n", ibv_get_device_name(dev_list[0]));
+    CHECK_NULL(ctx, "Failed to open device");
+    printf("[1] Opened device: %s\n", ibv_get_device_name(dev_list[0]));
 
-    /* 自动检测传输层类型 */
+    /* Auto-detect transport layer type */
     is_roce = (detect_transport(ctx, RDMA_DEFAULT_PORT_NUM) == RDMA_TRANSPORT_ROCE);
-    printf("    传输层: %s\n", is_roce ? "RoCE" : "IB");
+    printf("    Transport: %s\n", is_roce ? "RoCE" : "IB");
 
-    /* ---- 步骤 2: 查询设备 inline 能力 ---- */
+    /* ---- Step 2: Query device inline capability ---- */
     struct ibv_device_attr dev_attr;
     ret = ibv_query_device(ctx, &dev_attr);
-    CHECK_ERRNO(ret, "查询设备属性失败");
+    CHECK_ERRNO(ret, "Failed to query device attributes");
     /*
-     * 注意: ibv_device_attr 中没有直接的 max_inline_data 字段。
-     * max_inline_data 实际由驱动在 QP 创建时决定，
-     * 可以在 ibv_create_qp 的 cap 中设置请求值，
-     * 创建后 cap 中会返回实际支持的值。
+     * Note: ibv_device_attr does not have a direct max_inline_data field.
+     * max_inline_data is actually determined by the driver during QP creation,
+     * can be set as a requested value in ibv_create_qp's cap,
+     * and after creation, cap will return the actual supported value.
      */
-    printf("[2] 设备能力: max_qp_wr=%d, max_sge=%d\n",
+    printf("[2] Device capabilities: max_qp_wr=%d, max_sge=%d\n",
            dev_attr.max_qp_wr, dev_attr.max_sge);
 
-    /* ---- 步骤 3: 分配资源 ---- */
+    /* ---- Step 3: Allocate resources ---- */
     pd = ibv_alloc_pd(ctx);
-    CHECK_NULL(pd, "分配 PD 失败");
+    CHECK_NULL(pd, "Failed to allocate PD");
 
     send_cq = ibv_create_cq(ctx, CQ_DEPTH, NULL, NULL, 0);
-    CHECK_NULL(send_cq, "创建 send_cq 失败");
+    CHECK_NULL(send_cq, "Failed to create send_cq");
 
     recv_cq = ibv_create_cq(ctx, CQ_DEPTH, NULL, NULL, 0);
-    CHECK_NULL(recv_cq, "创建 recv_cq 失败");
+    CHECK_NULL(recv_cq, "Failed to create recv_cq");
 
-    /* 分配缓冲区 */
+    /* Allocate buffers */
     send_buf = malloc(BUFFER_SIZE);
     recv_buf = malloc(BUFFER_SIZE);
-    CHECK_NULL(send_buf, "分配 send_buf 失败");
-    CHECK_NULL(recv_buf, "分配 recv_buf 失败");
+    CHECK_NULL(send_buf, "Failed to allocate send_buf");
+    CHECK_NULL(recv_buf, "Failed to allocate recv_buf");
     memset(send_buf, 'A', BUFFER_SIZE);
     memset(recv_buf, 0, BUFFER_SIZE);
 
-    /* 注册内存 */
+    /* Register memory */
     send_mr = ibv_reg_mr(pd, send_buf, BUFFER_SIZE, IBV_ACCESS_LOCAL_WRITE);
-    CHECK_NULL(send_mr, "注册 send_mr 失败");
+    CHECK_NULL(send_mr, "Failed to register send_mr");
     recv_mr = ibv_reg_mr(pd, recv_buf, BUFFER_SIZE, IBV_ACCESS_LOCAL_WRITE);
-    CHECK_NULL(recv_mr, "注册 recv_mr 失败");
+    CHECK_NULL(recv_mr, "Failed to register recv_mr");
 
-    /* ---- 步骤 4: 创建 QP (带 inline data) ---- */
+    /* ---- Step 4: Create QP (with inline data) ---- */
     struct ibv_qp_init_attr qp_init_attr;
     memset(&qp_init_attr, 0, sizeof(qp_init_attr));
     qp_init_attr.send_cq = send_cq;
@@ -248,43 +248,43 @@ int main(int argc, char *argv[])
     qp_init_attr.cap.max_recv_wr  = MAX_RECV_WR;
     qp_init_attr.cap.max_send_sge = 1;
     qp_init_attr.cap.max_recv_sge = 1;
-    qp_init_attr.cap.max_inline_data = 256;  /* 请求 256 字节 inline */
+    qp_init_attr.cap.max_inline_data = 256;  /* Request 256-byte inline */
 
     qp = ibv_create_qp(pd, &qp_init_attr);
-    CHECK_NULL(qp, "创建 QP 失败");
+    CHECK_NULL(qp, "Failed to create QP");
 
     /*
-     * 创建后 qp_init_attr.cap.max_inline_data 会被更新为实际值
-     * 不同硬件/驱动支持的 max_inline_data 不同
+     * After creation, qp_init_attr.cap.max_inline_data is updated to the actual value.
+     * Different hardware/drivers support different max_inline_data.
      */
-    printf("[3] 创建 QP #%u\n", qp->qp_num);
-    printf("    请求 max_inline_data = 256\n");
-    printf("    实际 max_inline_data = %u\n", qp_init_attr.cap.max_inline_data);
+    printf("[3] Created QP #%u\n", qp->qp_num);
+    printf("    Requested max_inline_data = 256\n");
+    printf("    Actual max_inline_data = %u\n", qp_init_attr.cap.max_inline_data);
 
     if (qp_init_attr.cap.max_inline_data < MSG_SIZE) {
-        fprintf(stderr, "[警告] 设备不支持 %d 字节 inline, 最大 %u 字节\n",
+        fprintf(stderr, "[Warning] Device doesn't support %d-byte inline, max %u bytes\n",
                 MSG_SIZE, qp_init_attr.cap.max_inline_data);
-        fprintf(stderr, "        将跳过 inline 测试\n");
+        fprintf(stderr, "        Will skip inline test\n");
     }
 
-    /* ---- 步骤 5: Loopback 建连 ---- */
-    printf("[4] Loopback 建连...\n");
+    /* ---- Step 5: Loopback connection ---- */
+    printf("[4] Loopback connection...\n");
     struct rdma_endpoint local_ep;
     ret = fill_local_endpoint(ctx, qp, RDMA_DEFAULT_PORT_NUM,
                               RDMA_DEFAULT_GID_INDEX, &local_ep);
-    CHECK_ERRNO(ret, "填充本地端点信息失败");
+    CHECK_ERRNO(ret, "Failed to fill local endpoint info");
 
-    /* Loopback: 远端就是自己 */
+    /* Loopback: remote is self */
     ret = qp_full_connect(qp, &local_ep, RDMA_DEFAULT_PORT_NUM,
                           is_roce, IBV_ACCESS_LOCAL_WRITE);
-    CHECK_ERRNO(ret, "QP 建连失败");
+    CHECK_ERRNO(ret, "QP connection failed");
     print_qp_state(qp);
 
-    /* ---- 步骤 6: 普通发送测试 ---- */
-    printf("\n===== 测试 1: 普通发送 (DMA 路径) =====\n");
-    printf("  消息大小: %d 字节, 消息数: %d\n", MSG_SIZE, NUM_MESSAGES);
+    /* ---- Step 6: Normal send test ---- */
+    printf("\n===== Test 1: Normal Send (DMA Path) =====\n");
+    printf("  Message size: %d bytes, message count: %d\n", MSG_SIZE, NUM_MESSAGES);
 
-    /* 先发布所有 recv */
+    /* Post all recvs first */
     ret = post_recvs(qp, recv_mr, recv_buf, NUM_MESSAGES);
     if (ret != 0) goto cleanup;
 
@@ -293,22 +293,22 @@ int main(int argc, char *argv[])
     uint64_t t2 = get_time_ns();
     if (ret != 0) goto cleanup;
 
-    /* 消费 recv CQ */
+    /* Drain recv CQ */
     ret = drain_recv_cq(recv_cq, NUM_MESSAGES);
     if (ret != 0) goto cleanup;
 
     double normal_us = (double)(t2 - t1) / 1000.0;
     double normal_per_msg = normal_us / NUM_MESSAGES;
-    printf("  总耗时: %.2f μs\n", normal_us);
-    printf("  平均每消息: %.3f μs\n", normal_per_msg);
+    printf("  Total time: %.2f us\n", normal_us);
+    printf("  Average per message: %.3f us\n", normal_per_msg);
 
-    /* ---- 步骤 7: Inline 发送测试 ---- */
-    printf("\n===== 测试 2: Inline 发送 (数据嵌入 WQE) =====\n");
-    printf("  消息大小: %d 字节, 消息数: %d\n", MSG_SIZE, NUM_MESSAGES);
-    printf("  IBV_SEND_INLINE 标志: 已启用\n");
-    printf("  lkey: 不需要 (数据直接在 WQE 中)\n");
+    /* ---- Step 7: Inline send test ---- */
+    printf("\n===== Test 2: Inline Send (Data Embedded in WQE) =====\n");
+    printf("  Message size: %d bytes, message count: %d\n", MSG_SIZE, NUM_MESSAGES);
+    printf("  IBV_SEND_INLINE flag: enabled\n");
+    printf("  lkey: not needed (data is directly in WQE)\n");
 
-    /* 再次发布 recv */
+    /* Post recvs again */
     ret = post_recvs(qp, recv_mr, recv_buf, NUM_MESSAGES);
     if (ret != 0) goto cleanup;
 
@@ -317,43 +317,43 @@ int main(int argc, char *argv[])
     uint64_t t4 = get_time_ns();
     if (ret != 0) goto cleanup;
 
-    /* 消费 recv CQ */
+    /* Drain recv CQ */
     ret = drain_recv_cq(recv_cq, NUM_MESSAGES);
     if (ret != 0) goto cleanup;
 
     double inline_us = (double)(t4 - t3) / 1000.0;
     double inline_per_msg = inline_us / NUM_MESSAGES;
-    printf("  总耗时: %.2f μs\n", inline_us);
-    printf("  平均每消息: %.3f μs\n", inline_per_msg);
+    printf("  Total time: %.2f us\n", inline_us);
+    printf("  Average per message: %.3f us\n", inline_per_msg);
 
-    /* ---- 结果对比 ---- */
-    printf("\n===== 性能对比 =====\n");
+    /* ---- Results comparison ---- */
+    printf("\n===== Performance Comparison =====\n");
     printf("  ┌──────────────┬───────────────┬──────────────┐\n");
-    printf("  │ 模式         │ 总耗时 (μs)   │ 每消息 (μs)  │\n");
+    printf("  │ Mode         │ Total (us)    │ Per-msg (us) │\n");
     printf("  ├──────────────┼───────────────┼──────────────┤\n");
-    printf("  │ 普通 (DMA)   │ %13.2f │ %12.3f │\n", normal_us, normal_per_msg);
+    printf("  │ Normal (DMA) │ %13.2f │ %12.3f │\n", normal_us, normal_per_msg);
     printf("  │ Inline       │ %13.2f │ %12.3f │\n", inline_us, inline_per_msg);
     printf("  └──────────────┴───────────────┴──────────────┘\n");
 
     if (inline_us < normal_us) {
         double speedup = normal_us / inline_us;
-        printf("\n  结论: Inline 模式快 %.2fx\n", speedup);
+        printf("\n  Conclusion: Inline mode is %.2fx faster\n", speedup);
     } else {
-        printf("\n  结论: 在当前环境下 Inline 未体现明显优势\n");
-        printf("  提示: SoftRoCE 模拟环境可能无法真实反映 Inline 优化效果\n");
-        printf("        在真实硬件 (ConnectX 等) 上差异会更明显\n");
+        printf("\n  Conclusion: Inline did not show significant advantage in current environment\n");
+        printf("  Note: SoftRoCE emulation may not reflect true Inline optimization\n");
+        printf("        The difference is more noticeable on real hardware (ConnectX, etc.)\n");
     }
 
-    printf("\n===== 原理总结 =====\n");
-    printf("  1. Inline Data 将小消息数据直接拷贝到 WQE (Work Queue Element) 中\n");
-    printf("  2. NIC 从 WQE 直接获取数据，跳过 DMA 读取步骤\n");
-    printf("  3. 省去一次 PCIe 往返，降低小消息延迟\n");
-    printf("  4. Inline 发送不需要 lkey (数据不再位于 MR 中)\n");
-    printf("  5. 适用于消息大小 < max_inline_data 的场景\n");
-    printf("  6. 不适用于大消息 (数据量超过 WQE 容量)\n");
+    printf("\n===== Principle Summary =====\n");
+    printf("  1. Inline Data copies small message data directly into the WQE (Work Queue Element)\n");
+    printf("  2. NIC takes data directly from WQE, skipping the DMA read step\n");
+    printf("  3. Saves one PCIe round-trip, reducing small message latency\n");
+    printf("  4. Inline send doesn't need lkey (data is no longer in MR)\n");
+    printf("  5. Applicable when message size < max_inline_data\n");
+    printf("  6. Not applicable for large messages (data exceeds WQE capacity)\n");
 
 cleanup:
-    /* 逆序释放资源 */
+    /* Release resources in reverse order */
     if (qp)       ibv_destroy_qp(qp);
     if (send_cq)  ibv_destroy_cq(send_cq);
     if (recv_cq)  ibv_destroy_cq(recv_cq);
@@ -365,6 +365,6 @@ cleanup:
     free(send_buf);
     free(recv_buf);
 
-    printf("\n程序结束\n");
+    printf("\nProgram finished\n");
     return 0;
 }

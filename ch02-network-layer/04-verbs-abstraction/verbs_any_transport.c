@@ -1,29 +1,29 @@
 /**
- * verbs_any_transport.c - Verbs 统一抽象层演示程序
+ * verbs_any_transport.c - Verbs Unified Abstraction Layer Demo Program
  *
- * 功能：
- *   - 演示同一套 ibv_get_device_list / ibv_open_device 代码在任何传输类型下都能工作
- *   - 打开每个设备，查询设备属性和端口属性
- *   - 打印每个设备的传输类型 (IB / RoCE / iWARP)
- *   - 显示 /dev/infiniband/ 设备文件
- *   - 展示 Verbs 如何统一抽象三种传输
- *   - 大量使用 common/rdma_utils.h 的查询打印函数
+ * Features:
+ *   - Demonstrate that the same ibv_get_device_list / ibv_open_device code works on any transport type
+ *   - Open each device, query device attributes and port attributes
+ *   - Print the transport type (IB / RoCE / iWARP) for each device
+ *   - Display /dev/infiniband/ device files
+ *   - Show how Verbs provides a unified abstraction for three transports
+ *   - Extensively uses query and print functions from common/rdma_utils.h
  *
- * 编译:
+ * Compile:
  *   gcc -o verbs_any_transport verbs_any_transport.c -I../../common \
  *       ../../common/librdma_utils.a -libverbs
  *
- * 预期输出:
- *   ===== 统一 Verbs API 演示 =====
- *   下面的代码对 IB / RoCE / iWARP 完全通用
+ * Expected Output:
+ *   ===== Unified Verbs API Demo =====
+ *   The following code is fully generic for IB / RoCE / iWARP
  *
- *   === 设备 0: rxe_0 ===
- *   传输类型: RoCE
- *   [设备属性]
+ *   === Device 0: rxe_0 ===
+ *   Transport Type: RoCE
+ *   [Device Attributes]
  *   ...
- *   [端口属性]
+ *   [Port Attributes]
  *   ...
- *   [GID 表]
+ *   [GID Table]
  *   ...
  */
 
@@ -31,75 +31,75 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <dirent.h>       /* 用于读取 /dev/infiniband/ 目录 */
-#include <sys/stat.h>     /* 用于 stat() 检查文件类型 */
+#include <dirent.h>       /* For reading /dev/infiniband/ directory */
+#include <sys/stat.h>     /* For stat() to check file type */
 #include <infiniband/verbs.h>
 
-/* 引入公共工具库 —— 提供设备/端口/GID 查询和打印功能 */
+/* Include common utility library -- provides device/port/GID query and print functions */
 #include "rdma_utils.h"
 
-/* ========== 辅助函数 ========== */
+/* ========== Helper Functions ========== */
 
 /**
- * show_dev_files - 显示 /dev/infiniband/ 下的设备文件
+ * show_dev_files - Display device files under /dev/infiniband/
  *
- * Verbs 通过这些字符设备文件与内核交互：
- *   - uverbs0, uverbs1, ... : 每个 RDMA 设备对应一个
- *   - rdma_cm : RDMA CM 字符设备
+ * Verbs interacts with the kernel through these character device files:
+ *   - uverbs0, uverbs1, ... : One per RDMA device
+ *   - rdma_cm : RDMA CM character device
  */
 static void show_dev_files(void)
 {
-    const char *dev_path = "/dev/infiniband";   /* 设备文件目录 */
-    DIR *dir = NULL;                            /* 目录句柄 */
-    struct dirent *entry = NULL;                /* 目录条目 */
+    const char *dev_path = "/dev/infiniband";   /* Device file directory */
+    DIR *dir = NULL;                            /* Directory handle */
+    struct dirent *entry = NULL;                /* Directory entry */
 
     printf("\n");
     printf("============================================================\n");
-    printf("  /dev/infiniband/ 设备文件\n");
+    printf("  /dev/infiniband/ Device Files\n");
     printf("============================================================\n");
 
     dir = opendir(dev_path);
     if (!dir) {
-        printf("  无法打开 %s: %s\n", dev_path, strerror(errno));
-        printf("  提示: 请确认 RDMA 驱动已加载\n");
+        printf("  Cannot open %s: %s\n", dev_path, strerror(errno));
+        printf("  Hint: Please verify RDMA drivers are loaded\n");
         return;
     }
 
-    int count = 0;                              /* 文件计数 */
+    int count = 0;                              /* File count */
     while ((entry = readdir(dir)) != NULL) {
-        /* 跳过 . 和 .. */
+        /* Skip . and .. */
         if (entry->d_name[0] == '.')
             continue;
 
-        /* 构建完整路径 */
+        /* Build full path */
         char full_path[512];
         snprintf(full_path, sizeof(full_path), "%s/%s",
                  dev_path, entry->d_name);
 
-        /* 获取文件信息 */
+        /* Get file information */
         struct stat st;
         if (stat(full_path, &st) == 0) {
-            const char *type_str;               /* 文件类型描述 */
+            const char *type_str;               /* File type description */
             if (S_ISCHR(st.st_mode))
-                type_str = "字符设备";
+                type_str = "char device";
             else if (S_ISDIR(st.st_mode))
-                type_str = "目录";
+                type_str = "directory";
             else
-                type_str = "文件";
+                type_str = "file";
 
             printf("  %-20s  [%s]", entry->d_name, type_str);
 
-            /* 解释各设备文件的用途 */
+            /* Explain the purpose of each device file */
             if (strncmp(entry->d_name, "uverbs", 6) == 0)
-                printf("  -- Verbs 用户态接口");
+                printf("  -- Verbs userspace interface");
             else if (strcmp(entry->d_name, "rdma_cm") == 0)
-                printf("  -- RDMA CM 连接管理");
+                printf("  -- RDMA CM connection management");
             else if (strncmp(entry->d_name, "ucm", 3) == 0)
-                printf("  -- IB CM 用户态接口");
+                printf("  -- IB CM userspace interface");
             else if (strncmp(entry->d_name, "umad", 4) == 0)
-                printf("  -- IB MAD 用户态接口");
+                printf("  -- IB MAD userspace interface");
             else if (strncmp(entry->d_name, "issm", 4) == 0)
-                printf("  -- IB SM 接口");
+                printf("  -- IB SM interface");
 
             printf("\n");
             count++;
@@ -109,13 +109,13 @@ static void show_dev_files(void)
     closedir(dir);
 
     if (count == 0)
-        printf("  (目录为空)\n");
+        printf("  (directory is empty)\n");
     else
-        printf("  共 %d 个设备文件\n", count);
+        printf("  Total %d device file(s)\n", count);
 }
 
 /**
- * show_sysfs_info - 显示 /sys/class/infiniband/ 下的 sysfs 信息
+ * show_sysfs_info - Display sysfs info under /sys/class/infiniband/
  */
 static void show_sysfs_info(void)
 {
@@ -125,12 +125,12 @@ static void show_sysfs_info(void)
 
     printf("\n");
     printf("============================================================\n");
-    printf("  /sys/class/infiniband/ sysfs 信息\n");
+    printf("  /sys/class/infiniband/ sysfs Information\n");
     printf("============================================================\n");
 
     dir = opendir(sysfs_path);
     if (!dir) {
-        printf("  无法打开 %s: %s\n", sysfs_path, strerror(errno));
+        printf("  Cannot open %s: %s\n", sysfs_path, strerror(errno));
         return;
     }
 
@@ -140,7 +140,7 @@ static void show_sysfs_info(void)
 
         printf("  %-20s", entry->d_name);
 
-        /* 读取 node_type */
+        /* Read node_type */
         char path[512];
         char buf[64];
         FILE *fp;
@@ -150,7 +150,7 @@ static void show_sysfs_info(void)
         fp = fopen(path, "r");
         if (fp) {
             if (fgets(buf, sizeof(buf), fp)) {
-                /* 去掉换行符 */
+                /* Remove newline character */
                 buf[strcspn(buf, "\n")] = '\0';
                 printf("  node_type=%s", buf);
             }
@@ -163,150 +163,150 @@ static void show_sysfs_info(void)
     closedir(dir);
 }
 
-/* ========== 主函数 ========== */
+/* ========== Main Function ========== */
 
 int main(int argc, char *argv[])
 {
-    struct ibv_device **dev_list = NULL;    /* 设备列表 */
-    int num_devices = 0;                    /* 设备数量 */
-    int ret = 0;                            /* 返回值 */
+    struct ibv_device **dev_list = NULL;    /* Device list */
+    int num_devices = 0;                    /* Number of devices */
+    int ret = 0;                            /* Return value */
 
     printf("============================================================\n");
-    printf("  Verbs 统一抽象层演示\n");
-    printf("  同一套代码支持 InfiniBand / RoCE / iWARP\n");
+    printf("  Verbs Unified Abstraction Layer Demo\n");
+    printf("  Same code supports InfiniBand / RoCE / iWARP\n");
     printf("============================================================\n");
     printf("\n");
-    printf("  关键观点:\n");
+    printf("  Key Insight:\n");
     printf("  ibv_get_device_list() / ibv_open_device() / ibv_query_*\n");
-    printf("  这些 API 在所有传输类型上都完全相同!\n");
-    printf("  唯一需要区分的是设置 ah_attr 时的寻址方式。\n");
+    printf("  These APIs are exactly the same across all transport types!\n");
+    printf("  The only difference is the addressing in ah_attr setup.\n");
     printf("\n");
 
-    /* ===== 第一步：统一的设备枚举 (所有传输类型通用) ===== */
+    /* ===== Step 1: Unified device enumeration (common to all transport types) ===== */
     printf("------------------------------------------------------------\n");
-    printf("  第一步: ibv_get_device_list() 枚举所有设备\n");
-    printf("  (此 API 对 IB/RoCE/iWARP 完全相同)\n");
+    printf("  Step 1: ibv_get_device_list() enumerates all devices\n");
+    printf("  (This API is identical for IB/RoCE/iWARP)\n");
     printf("------------------------------------------------------------\n");
 
     dev_list = ibv_get_device_list(&num_devices);
     if (!dev_list) {
-        fprintf(stderr, "[错误] ibv_get_device_list() 失败: %s\n",
+        fprintf(stderr, "[Error] ibv_get_device_list() failed: %s\n",
                 strerror(errno));
         return 1;
     }
 
     if (num_devices == 0) {
-        fprintf(stderr, "[错误] 未找到 RDMA 设备\n");
+        fprintf(stderr, "[Error] No RDMA devices found\n");
         ret = 1;
         goto cleanup;
     }
 
-    printf("  发现 %d 个 RDMA 设备\n\n", num_devices);
+    printf("  Found %d RDMA device(s)\n\n", num_devices);
 
-    /* ===== 第二步：遍历每个设备，统一查询 ===== */
+    /* ===== Step 2: Iterate over each device, unified query ===== */
     for (int i = 0; i < num_devices; i++) {
         struct ibv_device *dev = dev_list[i];
-        struct ibv_context *ctx = NULL;             /* 设备上下文 */
-        struct ibv_device_attr dev_attr;            /* 设备属性 */
+        struct ibv_context *ctx = NULL;             /* Device context */
+        struct ibv_device_attr dev_attr;            /* Device attributes */
 
         printf("============================================================\n");
-        printf("  设备 %d: %s\n", i, ibv_get_device_name(dev));
+        printf("  Device %d: %s\n", i, ibv_get_device_name(dev));
         printf("============================================================\n");
 
-        /* 第二步-A: ibv_open_device() (所有传输类型通用) */
+        /* Step 2-A: ibv_open_device() (common to all transport types) */
         ctx = ibv_open_device(dev);
         if (!ctx) {
-            fprintf(stderr, "  [错误] ibv_open_device() 失败: %s\n",
+            fprintf(stderr, "  [Error] ibv_open_device() failed: %s\n",
                     strerror(errno));
             continue;
         }
 
-        /* 检测传输类型 */
+        /* Detect transport type */
         enum rdma_transport transport = detect_transport(ctx, 1);
-        printf("\n  传输类型: %s\n", transport_str(transport));
+        printf("\n  Transport Type: %s\n", transport_str(transport));
 
-        /* 第二步-B: 使用公共库打印设备属性 (所有传输类型通用) */
-        printf("\n  [设备属性] (ibv_query_device - 所有传输通用)\n");
+        /* Step 2-B: Use common library to print device attributes (common to all transport types) */
+        printf("\n  [Device Attributes] (ibv_query_device - common to all transports)\n");
         query_and_print_device(ctx);
 
-        /* 第二步-C: 查询端口数量 */
+        /* Step 2-C: Query port count */
         memset(&dev_attr, 0, sizeof(dev_attr));
         ret = ibv_query_device(ctx, &dev_attr);
         if (ret) {
-            fprintf(stderr, "  [错误] ibv_query_device() 失败\n");
+            fprintf(stderr, "  [Error] ibv_query_device() failed\n");
             ibv_close_device(ctx);
             continue;
         }
 
-        /* 第二步-D: 使用公共库打印每个端口的属性 (所有传输类型通用) */
+        /* Step 2-D: Use common library to print port attributes (common to all transport types) */
         for (uint8_t port = 1; port <= dev_attr.phys_port_cnt; port++) {
-            printf("\n  [端口 %u 属性] (ibv_query_port - 所有传输通用)\n", port);
+            printf("\n  [Port %u Attributes] (ibv_query_port - common to all transports)\n", port);
             query_and_print_port(ctx, port);
 
-            /* 第二步-E: 使用公共库打印 GID 表 (所有传输类型通用) */
-            printf("\n  [端口 %u GID 表] (ibv_query_gid - 所有传输通用)\n", port);
+            /* Step 2-E: Use common library to print GID table (common to all transport types) */
+            printf("\n  [Port %u GID Table] (ibv_query_gid - common to all transports)\n", port);
             query_and_print_all_gids(ctx, port);
 
-            /* 第二步-F: 根据传输类型给出寻址建议 */
+            /* Step 2-F: Give addressing advice based on transport type */
             struct ibv_port_attr port_attr;
             memset(&port_attr, 0, sizeof(port_attr));
             ibv_query_port(ctx, port, &port_attr);
 
-            printf("\n  [寻址方式建议]\n");
+            printf("\n  [Addressing Recommendation]\n");
             if (port_attr.link_layer == IBV_LINK_LAYER_ETHERNET) {
-                /* RoCE 或 iWARP: 使用 GID 寻址 */
-                printf("    此端口为以太网链路 → 使用 GID 寻址\n");
+                /* RoCE or iWARP: Use GID addressing */
+                printf("    This port is Ethernet link -> Use GID addressing\n");
                 printf("    ah_attr.is_global  = 1\n");
                 printf("    ah_attr.grh.dgid   = remote_gid\n");
-                printf("    ah_attr.grh.sgid_index = <选择 RoCE v2 的 GID 索引>\n");
+                printf("    ah_attr.grh.sgid_index = <choose RoCE v2 GID index>\n");
             } else if (port_attr.link_layer == IBV_LINK_LAYER_INFINIBAND) {
-                /* IB: 使用 LID 寻址 */
-                printf("    此端口为 InfiniBand 链路 → 使用 LID 寻址\n");
-                printf("    ah_attr.dlid       = remote_lid (当前端口 LID=%u)\n",
+                /* IB: Use LID addressing */
+                printf("    This port is InfiniBand link -> Use LID addressing\n");
+                printf("    ah_attr.dlid       = remote_lid (current port LID=%u)\n",
                        port_attr.lid);
-                printf("    ah_attr.is_global  = 0 (子网内)\n");
+                printf("    ah_attr.is_global  = 0 (within subnet)\n");
             } else {
-                printf("    链路层类型未知，请检查驱动\n");
+                printf("    Link layer type unknown, please check driver\n");
             }
         }
 
-        /* 关闭设备 (所有传输类型通用) */
+        /* Close device (common to all transport types) */
         ibv_close_device(ctx);
         printf("\n");
     }
 
-    /* ===== 第三步：显示设备文件和 sysfs ===== */
+    /* ===== Step 3: Display device files and sysfs ===== */
     show_dev_files();
     show_sysfs_info();
 
-    /* ===== 总结 ===== */
+    /* ===== Summary ===== */
     printf("\n");
     printf("============================================================\n");
-    printf("  总结: Verbs 统一抽象\n");
+    printf("  Summary: Verbs Unified Abstraction\n");
     printf("============================================================\n");
     printf("\n");
-    printf("  相同的 API，三种传输:\n");
-    printf("  ┌─────────────────────────────────────────────────┐\n");
-    printf("  │ API                     │ IB │ RoCE │ iWARP     │\n");
-    printf("  ├─────────────────────────┼────┼──────┼───────────┤\n");
-    printf("  │ ibv_get_device_list()   │ ✓  │  ✓   │    ✓      │\n");
-    printf("  │ ibv_open_device()       │ ✓  │  ✓   │    ✓      │\n");
-    printf("  │ ibv_query_device()      │ ✓  │  ✓   │    ✓      │\n");
-    printf("  │ ibv_query_port()        │ ✓  │  ✓   │    ✓      │\n");
-    printf("  │ ibv_query_gid()         │ ✓  │  ✓   │    ✓      │\n");
-    printf("  │ ibv_alloc_pd()          │ ✓  │  ✓   │    ✓      │\n");
-    printf("  │ ibv_reg_mr()            │ ✓  │  ✓   │    ✓      │\n");
-    printf("  │ ibv_create_cq()         │ ✓  │  ✓   │    ✓      │\n");
-    printf("  │ ibv_create_qp()         │ ✓  │  ✓   │    ✓      │\n");
-    printf("  │ ibv_post_send()         │ ✓  │  ✓   │    ✓      │\n");
-    printf("  │ ibv_post_recv()         │ ✓  │  ✓   │    ✓      │\n");
-    printf("  │ ibv_poll_cq()           │ ✓  │  ✓   │    ✓      │\n");
-    printf("  └─────────────────────────┴────┴──────┴───────────┘\n");
+    printf("  Same API, Three Transports:\n");
+    printf("  +-------------------------------------------------+\n");
+    printf("  | API                     | IB | RoCE | iWARP     |\n");
+    printf("  +-------------------------+----+------+-----------+\n");
+    printf("  | ibv_get_device_list()   |  Y |   Y  |     Y     |\n");
+    printf("  | ibv_open_device()       |  Y |   Y  |     Y     |\n");
+    printf("  | ibv_query_device()      |  Y |   Y  |     Y     |\n");
+    printf("  | ibv_query_port()        |  Y |   Y  |     Y     |\n");
+    printf("  | ibv_query_gid()         |  Y |   Y  |     Y     |\n");
+    printf("  | ibv_alloc_pd()          |  Y |   Y  |     Y     |\n");
+    printf("  | ibv_reg_mr()            |  Y |   Y  |     Y     |\n");
+    printf("  | ibv_create_cq()         |  Y |   Y  |     Y     |\n");
+    printf("  | ibv_create_qp()         |  Y |   Y  |     Y     |\n");
+    printf("  | ibv_post_send()         |  Y |   Y  |     Y     |\n");
+    printf("  | ibv_post_recv()         |  Y |   Y  |     Y     |\n");
+    printf("  | ibv_poll_cq()           |  Y |   Y  |     Y     |\n");
+    printf("  +--------------------------+----+------+-----------+\n");
     printf("\n");
-    printf("  唯一的差异: ibv_modify_qp() 中 ah_attr 的设置\n");
+    printf("  The only difference: ah_attr setup in ibv_modify_qp()\n");
     printf("    - IB:    ah_attr.dlid = remote_lid, is_global = 0\n");
     printf("    - RoCE:  ah_attr.grh.dgid = remote_gid, is_global = 1\n");
-    printf("    - iWARP: 通常使用 RDMA CM, 不直接设置 ah_attr\n");
+    printf("    - iWARP: Typically uses RDMA CM, does not set ah_attr directly\n");
     printf("\n");
 
 cleanup:

@@ -1,16 +1,16 @@
 /**
- * RDMA Send/Recv 完整示例 - Loopback 模式
+ * RDMA Send/Recv Complete Example - Loopback Mode
  *
- * 这是一个 Loopback 示例，同一机器上模拟 client-server 通信。
- * 实际使用时需要两台机器，通过 TCP 交换 QP 信息。
+ * This is a Loopback example, simulating client-server communication on the same machine.
+ * In actual use, two machines are needed, exchanging QP info via TCP.
  *
- * 增强功能:
- *   - IB/RoCE 自动检测 (detect_transport)
- *   - 多 SGE 发送示例 (使用 2 个 SGE 发送一条消息)
- *   - 打印详细 WC 字段 (print_wc_detail)
- *   - max_send_sge/max_recv_sge 提升到 4
+ * Enhanced features:
+ *   - IB/RoCE auto-detection (detect_transport)
+ *   - Multi-SGE send example (using 2 SGEs to send one message)
+ *   - Detailed WC field printing (print_wc_detail)
+ *   - max_send_sge/max_recv_sge increased to 4
  *
- * 编译: gcc -Wall -O2 -g -o 01_loopback_send_recv 01_loopback_send_recv.c \
+ * Build: gcc -Wall -O2 -g -o 01_loopback_send_recv 01_loopback_send_recv.c \
  *        -I../../common -L../../common -lrdma_utils -libverbs
  */
 
@@ -23,7 +23,7 @@
 
 #define BUFFER_SIZE 1024
 
-/* RDMA 资源结构 */
+/* RDMA resource structure */
 struct rdma_resources {
     struct ibv_context *context;
     struct ibv_pd *pd;
@@ -33,11 +33,11 @@ struct rdma_resources {
     struct ibv_mr *recv_mr;
     char *send_buf;
     char *recv_buf;
-    int is_roce;        /* IB/RoCE 自动检测结果 */
+    int is_roce;        /* IB/RoCE auto-detection result */
     uint8_t port;
 };
 
-/* 初始化RDMA资源 */
+/* Initialize RDMA resources */
 int init_rdma_resources(struct rdma_resources *res)
 {
     struct ibv_device **device_list;
@@ -45,58 +45,58 @@ int init_rdma_resources(struct rdma_resources *res)
     struct ibv_qp_init_attr qp_init_attr;
     int num;
 
-    /* 1. 获取设备 */
+    /* 1. Get device */
     device_list = ibv_get_device_list(&num);
     if (!device_list || num == 0) {
-        fprintf(stderr, "没有RDMA设备\n");
+        fprintf(stderr, "No RDMA devices\n");
         return -1;
     }
     device = device_list[0];
 
-    /* 2. 打开设备 */
+    /* 2. Open device */
     res->context = ibv_open_device(device);
     if (!res->context) {
-        perror("打开设备失败");
+        perror("Failed to open device");
         return -1;
     }
 
-    /* 3. 检测传输层类型 */
+    /* 3. Detect transport layer type */
     res->port = RDMA_DEFAULT_PORT_NUM;
     enum rdma_transport transport = detect_transport(res->context, res->port);
     res->is_roce = (transport == RDMA_TRANSPORT_ROCE);
-    printf("传输层类型: %s\n", transport_str(transport));
+    printf("Transport layer type: %s\n", transport_str(transport));
 
-    /* 4. 分配PD */
+    /* 4. Allocate PD */
     res->pd = ibv_alloc_pd(res->context);
     if (!res->pd) {
-        perror("分配PD失败");
+        perror("Failed to allocate PD");
         return -1;
     }
 
-    /* 5. 创建CQ */
+    /* 5. Create CQ */
     res->cq = ibv_create_cq(res->context, 256, NULL, NULL, 0);
     if (!res->cq) {
-        perror("创建CQ失败");
+        perror("Failed to create CQ");
         return -1;
     }
 
-    /* 6. 创建QP (max_send_sge=4, max_recv_sge=4 以支持多 SGE) */
+    /* 6. Create QP (max_send_sge=4, max_recv_sge=4 to support multi-SGE) */
     memset(&qp_init_attr, 0, sizeof(qp_init_attr));
     qp_init_attr.send_cq = res->cq;
     qp_init_attr.recv_cq = res->cq;
     qp_init_attr.qp_type = IBV_QPT_RC;
     qp_init_attr.cap.max_send_wr = 128;
     qp_init_attr.cap.max_recv_wr = 128;
-    qp_init_attr.cap.max_send_sge = 4;  /* 提升到 4，支持多 SGE 发送 */
-    qp_init_attr.cap.max_recv_sge = 4;  /* 提升到 4，支持多 SGE 接收 */
+    qp_init_attr.cap.max_send_sge = 4;  /* Increased to 4, supports multi-SGE send */
+    qp_init_attr.cap.max_recv_sge = 4;  /* Increased to 4, supports multi-SGE recv */
 
     res->qp = ibv_create_qp(res->pd, &qp_init_attr);
     if (!res->qp) {
-        perror("创建QP失败");
+        perror("Failed to create QP");
         return -1;
     }
 
-    /* 7. 分配和注册内存 */
+    /* 7. Allocate and register memory */
     res->send_buf = malloc(BUFFER_SIZE);
     res->recv_buf = malloc(BUFFER_SIZE);
 
@@ -109,7 +109,7 @@ int init_rdma_resources(struct rdma_resources *res)
     return 0;
 }
 
-/* 发送数据 - 单 SGE 版本 */
+/* Send data - single SGE version */
 int post_send(struct rdma_resources *res, char *data, int len)
 {
     struct ibv_sge sge = {
@@ -131,20 +131,20 @@ int post_send(struct rdma_resources *res, char *data, int len)
 }
 
 /**
- * 多 SGE 发送: 使用 2 个 SGE 将消息分为 "前缀" 和 "正文" 两段发送
+ * Multi-SGE send: uses 2 SGEs to split the message into "prefix" and "body" segments
  *
- * NIC 会自动将两段数据 gather 成一个 RDMA 消息。
- * 接收端在一个连续缓冲区中收到拼接后的完整消息。
+ * The NIC will automatically gather the two data segments into a single RDMA message.
+ * The receiver gets the concatenated complete message in one contiguous buffer.
  */
 int post_send_multi_sge(struct rdma_resources *res,
                         const char *prefix, int prefix_len,
                         const char *body, int body_len)
 {
-    /* 将前缀和正文分别放入 send_buf 的不同位置 */
+    /* Place prefix and body at different positions in send_buf */
     memcpy(res->send_buf, prefix, prefix_len);
-    memcpy(res->send_buf + 512, body, body_len);  /* 偏移 512 放正文 */
+    memcpy(res->send_buf + 512, body, body_len);  /* Offset 512 for body */
 
-    /* 2 个 SGE: 分别指向前缀和正文 */
+    /* 2 SGEs: pointing to prefix and body respectively */
     struct ibv_sge sges[2];
     sges[0].addr   = (uint64_t)res->send_buf;
     sges[0].length = prefix_len;
@@ -154,16 +154,16 @@ int post_send_multi_sge(struct rdma_resources *res,
     sges[1].length = body_len;
     sges[1].lkey   = res->send_mr->lkey;
 
-    printf("  多 SGE 发送:\n");
-    printf("    SGE[0]: addr=%p, length=%d (前缀)\n",
+    printf("  Multi-SGE send:\n");
+    printf("    SGE[0]: addr=%p, length=%d (prefix)\n",
            (void *)sges[0].addr, sges[0].length);
-    printf("    SGE[1]: addr=%p, length=%d (正文)\n",
+    printf("    SGE[1]: addr=%p, length=%d (body)\n",
            (void *)sges[1].addr, sges[1].length);
 
     struct ibv_send_wr wr = {
         .wr_id = 2,
         .sg_list = sges,
-        .num_sge = 2,       /* 2 个 SGE! */
+        .num_sge = 2,       /* 2 SGEs! */
         .opcode = IBV_WR_SEND,
         .send_flags = IBV_SEND_SIGNALED,
     };
@@ -172,7 +172,7 @@ int post_send_multi_sge(struct rdma_resources *res,
     return ibv_post_send(res->qp, &wr, &bad_wr);
 }
 
-/* 接收数据 */
+/* Receive data */
 int post_recv(struct rdma_resources *res)
 {
     struct ibv_sge sge = {
@@ -199,25 +199,25 @@ int main(int argc, char *argv[])
     (void)argc;
     (void)argv;
 
-    printf("=== RDMA Send/Recv Loopback 示例 (增强版) ===\n\n");
+    printf("=== RDMA Send/Recv Loopback Example (Enhanced) ===\n\n");
 
-    /* 初始化资源 */
+    /* Initialize resources */
     if (init_rdma_resources(&res) != 0) {
         return 1;
     }
-    printf("资源初始化完成\n");
-    printf("  QP号: %u\n", res.qp->qp_num);
+    printf("Resource initialization complete\n");
+    printf("  QP number: %u\n", res.qp->qp_num);
     printf("  max_send_sge: 4, max_recv_sge: 4\n");
 
-    /* 配置 QP 状态机 - 使用 IB/RoCE 自动检测 */
-    printf("\n配置QP状态机 (Loopback)...\n");
+    /* Configure QP state machine - using IB/RoCE auto-detection */
+    printf("\nConfiguring QP state machine (Loopback)...\n");
 
-    /* 填充本地端点信息 */
+    /* Fill local endpoint info */
     struct rdma_endpoint self_ep;
     memset(&self_ep, 0, sizeof(self_ep));
     if (fill_local_endpoint(res.context, res.qp, res.port,
                             RDMA_DEFAULT_GID_INDEX, &self_ep) != 0) {
-        fprintf(stderr, "填充端点信息失败\n");
+        fprintf(stderr, "Failed to fill endpoint info\n");
         return 1;
     }
     printf("  LID: %u\n", self_ep.lid);
@@ -227,97 +227,97 @@ int main(int argc, char *argv[])
         printf("  GID: %s\n", gid_str);
     }
 
-    /* QP 全状态转换: RESET -> INIT -> RTR -> RTS */
+    /* QP full state transition: RESET -> INIT -> RTR -> RTS */
     int access = IBV_ACCESS_LOCAL_WRITE;
     if (qp_full_connect(res.qp, &self_ep, res.port, res.is_roce, access) != 0) {
-        fprintf(stderr, "QP 建连失败\n");
+        fprintf(stderr, "QP connection failed\n");
         return 1;
     }
-    printf("  QP状态: RTS (Ready to Send)\n");
+    printf("  QP state: RTS (Ready to Send)\n");
 
-    /* ========== 测试 1: 单 SGE Send/Recv ========== */
+    /* ========== Test 1: Single SGE Send/Recv ========== */
     printf("\n========================================\n");
-    printf("  测试 1: 单 SGE Send/Recv\n");
+    printf("  Test 1: Single SGE Send/Recv\n");
     printf("========================================\n");
 
-    /* 步骤1: 接收端先 post_recv */
-    printf("\n[步骤1] 接收端 post_recv\n");
+    /* Step 1: Receiver posts recv first */
+    printf("\n[Step 1] Receiver post_recv\n");
     memset(res.recv_buf, 0, BUFFER_SIZE);
     post_recv(&res);
 
-    /* 步骤2: 发送端 post_send */
-    printf("[步骤2] 发送端 post_send: \"%s\"\n", message);
+    /* Step 2: Sender posts send */
+    printf("[Step 2] Sender post_send: \"%s\"\n", message);
     memcpy(res.send_buf, message, strlen(message) + 1);
     post_send(&res, res.send_buf, strlen(message) + 1);
 
-    /* 步骤3: 等待发送完成，打印详细 WC */
-    printf("[步骤3] 发送端等待 WC\n");
+    /* Step 3: Wait for send completion, print detailed WC */
+    printf("[Step 3] Sender waiting for WC\n");
     struct ibv_wc wc;
     if (poll_cq_blocking(res.cq, &wc) == 0) {
-        printf("  发送 WC 详情:\n");
+        printf("  Send WC details:\n");
         print_wc_detail(&wc);
     }
 
-    /* 步骤4: 等待接收完成，打印详细 WC */
-    printf("[步骤4] 接收端等待 WC\n");
+    /* Step 4: Wait for recv completion, print detailed WC */
+    printf("[Step 4] Receiver waiting for WC\n");
     if (poll_cq_blocking(res.cq, &wc) == 0) {
-        printf("  接收 WC 详情:\n");
+        printf("  Recv WC details:\n");
         print_wc_detail(&wc);
     }
 
-    /* 检查结果 */
-    printf("\n[结果] 收到的消息: \"%s\"\n", res.recv_buf);
+    /* Check result */
+    printf("\n[Result] Received message: \"%s\"\n", res.recv_buf);
 
-    /* ========== 测试 2: 多 SGE Send/Recv ========== */
+    /* ========== Test 2: Multi-SGE Send/Recv ========== */
     printf("\n========================================\n");
-    printf("  测试 2: 多 SGE Send/Recv (2 个 SGE)\n");
+    printf("  Test 2: Multi-SGE Send/Recv (2 SGEs)\n");
     printf("========================================\n");
 
     const char *prefix = "[MSG] ";
-    const char *body   = "这条消息由 2 个 SGE 拼接而成!";
+    const char *body   = "This message is assembled from 2 SGEs!";
 
-    /* 接收端先 post recv */
-    printf("\n[步骤1] 接收端 post_recv\n");
+    /* Receiver posts recv first */
+    printf("\n[Step 1] Receiver post_recv\n");
     memset(res.recv_buf, 0, BUFFER_SIZE);
     post_recv(&res);
 
-    /* 多 SGE 发送 */
-    printf("[步骤2] 多 SGE 发送:\n");
-    printf("  前缀: \"%s\" (%zu 字节)\n", prefix, strlen(prefix));
-    printf("  正文: \"%s\" (%zu 字节)\n", body, strlen(body) + 1);
+    /* Multi-SGE send */
+    printf("[Step 2] Multi-SGE send:\n");
+    printf("  Prefix: \"%s\" (%zu bytes)\n", prefix, strlen(prefix));
+    printf("  Body: \"%s\" (%zu bytes)\n", body, strlen(body) + 1);
     post_send_multi_sge(&res, prefix, strlen(prefix),
                         body, strlen(body) + 1);
 
-    /* 等待发送完成 */
-    printf("[步骤3] 发送端等待 WC\n");
+    /* Wait for send completion */
+    printf("[Step 3] Sender waiting for WC\n");
     if (poll_cq_blocking(res.cq, &wc) == 0) {
-        printf("  发送 WC 详情:\n");
+        printf("  Send WC details:\n");
         print_wc_detail(&wc);
     }
 
-    /* 等待接收完成 */
-    printf("[步骤4] 接收端等待 WC\n");
+    /* Wait for recv completion */
+    printf("[Step 4] Receiver waiting for WC\n");
     if (poll_cq_blocking(res.cq, &wc) == 0) {
-        printf("  接收 WC 详情:\n");
+        printf("  Recv WC details:\n");
         print_wc_detail(&wc);
-        printf("  接收字节数: %u (前缀 %zu + 正文 %zu = %zu)\n",
+        printf("  Received bytes: %u (prefix %zu + body %zu = %zu)\n",
                wc.byte_len, strlen(prefix), strlen(body) + 1,
                strlen(prefix) + strlen(body) + 1);
     }
 
-    /* 检查拼接结果 */
-    printf("\n[结果] 收到的消息: \"%s\"\n", res.recv_buf);
+    /* Check concatenation result */
+    printf("\n[Result] Received message: \"%s\"\n", res.recv_buf);
 
-    /* 验证 */
+    /* Verify */
     char expected[BUFFER_SIZE];
     snprintf(expected, sizeof(expected), "%s%s", prefix, body);
     if (strcmp(res.recv_buf, expected) == 0) {
-        printf("[验证] ✓ 多 SGE 拼接正确!\n");
+        printf("[Verify] Multi-SGE concatenation correct!\n");
     } else {
-        printf("[验证] ✗ 拼接不匹配! 期望: \"%s\"\n", expected);
+        printf("[Verify] Concatenation mismatch! Expected: \"%s\"\n", expected);
     }
 
-    /* 清理 */
+    /* Cleanup */
     if (res.send_mr) ibv_dereg_mr(res.send_mr);
     if (res.recv_mr) ibv_dereg_mr(res.recv_mr);
     if (res.send_buf) free(res.send_buf);
@@ -327,6 +327,6 @@ int main(int argc, char *argv[])
     ibv_dealloc_pd(res.pd);
     ibv_close_device(res.context);
 
-    printf("\n程序结束\n");
+    printf("\nProgram finished\n");
     return 0;
 }

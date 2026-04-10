@@ -1,5 +1,5 @@
 # Top-level Makefile for ch05-communication
-# 先编译公共库，再编译各子目录的示例
+# First compile the common library, then compile examples in each subdirectory
 
 CC = gcc
 CFLAGS = -Wall -O2 -g -std=c11

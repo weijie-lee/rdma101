@@ -1,15 +1,15 @@
 /**
- * RDMA资源初始化 - 六步法 (增强版)
+ * RDMA Resource Initialization - Six-Step Method (Enhanced Version)
  *
- * 本程序演示RDMA编程的六个初始化步骤：
- * 1. 获取设备列表
- * 2. 打开设备 + 查询设备属性 (ibv_query_device) + 查询端口属性 (ibv_query_port)
- * 3. 分配保护域(PD)
- * 4. 注册内存区域(MR)
- * 5. 创建完成队列(CQ)
- * 6. 创建队列对(QP)
+ * This program demonstrates the six initialization steps of RDMA programming:
+ * 1. Get device list
+ * 2. Open device + Query device attributes (ibv_query_device) + Query port attributes (ibv_query_port)
+ * 3. Allocate Protection Domain (PD)
+ * 4. Register Memory Region (MR)
+ * 5. Create Completion Queue (CQ)
+ * 6. Create Queue Pair (QP)
  *
- * 编译: gcc -o 01_init_resources 01_init_resources.c -I../../common ../../common/librdma_utils.a -libverbs
+ * Compile: gcc -o 01_init_resources 01_init_resources.c -I../../common ../../common/librdma_utils.a -libverbs
  */
 
 #include <stdio.h>
@@ -32,90 +32,90 @@ int main(int argc, char *argv[])
     char *buffer = NULL;
     int num_devices;
     int i;
-    
-    printf("=== RDMA资源初始化 - 六步法 ===\n\n");
-    
-    /* ========== 步骤1: 获取设备列表 ========== */
-    printf("[步骤1] 获取设备列表\n");
+
+    printf("=== RDMA Resource Initialization - Six-Step Method ===\n\n");
+
+    /* ========== Step 1: Get device list ========== */
+    printf("[Step 1] Get device list\n");
     device_list = ibv_get_device_list(&num_devices);
     if (!device_list) {
-        perror("  ibv_get_device_list 失败");
+        perror("  ibv_get_device_list failed");
         return 1;
     }
-    printf("  发现 %d 个RDMA设备\n", num_devices);
-    
+    printf("  Found %d RDMA device(s)\n", num_devices);
+
     for (i = 0; i < num_devices; i++) {
-        printf("  设备[%d]: %s\n", i, ibv_get_device_name(device_list[i]));
+        printf("  Device[%d]: %s\n", i, ibv_get_device_name(device_list[i]));
     }
-    
-    /* 选择第一个设备 */
+
+    /* Select the first device */
     device = device_list[0];
     if (!device) {
-        fprintf(stderr, "  没有可用设备\n");
+        fprintf(stderr, "  No available device\n");
         goto cleanup;
     }
-    
-    /* ========== 步骤2: 打开设备 ========== */
-    printf("\n[步骤2] 打开设备\n");
+
+    /* ========== Step 2: Open device ========== */
+    printf("\n[Step 2] Open device\n");
     context = ibv_open_device(device);
     if (!context) {
-        perror("  ibv_open_device 失败");
+        perror("  ibv_open_device failed");
         goto cleanup;
     }
-    printf("  设备打开成功: %s\n", ibv_get_device_name(device));
+    printf("  Device opened successfully: %s\n", ibv_get_device_name(device));
 
-    /* ========== 步骤2a: 查询设备属性 (ibv_query_device) ========== */
-    printf("\n[步骤2a] 查询设备属性 (ibv_query_device)\n");
+    /* ========== Step 2a: Query device attributes (ibv_query_device) ========== */
+    printf("\n[Step 2a] Query device attributes (ibv_query_device)\n");
     struct ibv_device_attr dev_attr;
     if (ibv_query_device(context, &dev_attr) == 0) {
-        printf("  --- 基本信息 ---\n");
-        printf("  固件版本 (fw_ver):          %s\n", dev_attr.fw_ver);
-        printf("  节点 GUID:                  0x%016lx\n", (unsigned long)dev_attr.node_guid);
-        printf("  系统镜像 GUID:              0x%016lx\n", (unsigned long)dev_attr.sys_image_guid);
-        printf("  厂商 ID:                    0x%x\n", dev_attr.vendor_id);
-        printf("  厂商 Part ID:               %d\n", dev_attr.vendor_part_id);
-        printf("  硬件版本:                   %d\n", dev_attr.hw_ver);
-        printf("  物理端口数:                 %d\n", dev_attr.phys_port_cnt);
-        printf("  --- 队列能力 ---\n");
-        printf("  最大 QP 数量:               %d\n", dev_attr.max_qp);
-        printf("  每个 QP 最大 WR:            %d\n", dev_attr.max_qp_wr);
-        printf("  每个 WR 最大 SGE:           %d\n", dev_attr.max_sge);
-        printf("  最大 CQ 数量:               %d\n", dev_attr.max_cq);
-        printf("  每个 CQ 最大 CQE:           %d\n", dev_attr.max_cqe);
-        printf("  最大 SRQ 数量:              %d\n", dev_attr.max_srq);
-        printf("  每个 SRQ 最大 WR:           %d\n", dev_attr.max_srq_wr);
-        printf("  --- 内存区域 ---\n");
-        printf("  最大 MR 数量:               %d\n", dev_attr.max_mr);
-        printf("  最大 MR 大小:               %lu bytes\n", (unsigned long)dev_attr.max_mr_size);
-        printf("  最大 PD 数量:               %d\n", dev_attr.max_pd);
-        printf("  页面大小掩码:               0x%lx\n", (unsigned long)dev_attr.page_size_cap);
-        printf("  --- 原子操作 ---\n");
-        printf("  原子操作能力:               ");
+        printf("  --- Basic Information ---\n");
+        printf("  Firmware version (fw_ver):   %s\n", dev_attr.fw_ver);
+        printf("  Node GUID:                   0x%016lx\n", (unsigned long)dev_attr.node_guid);
+        printf("  System image GUID:           0x%016lx\n", (unsigned long)dev_attr.sys_image_guid);
+        printf("  Vendor ID:                   0x%x\n", dev_attr.vendor_id);
+        printf("  Vendor Part ID:              %d\n", dev_attr.vendor_part_id);
+        printf("  Hardware version:            %d\n", dev_attr.hw_ver);
+        printf("  Physical port count:         %d\n", dev_attr.phys_port_cnt);
+        printf("  --- Queue Capabilities ---\n");
+        printf("  Max QP count:                %d\n", dev_attr.max_qp);
+        printf("  Max WR per QP:               %d\n", dev_attr.max_qp_wr);
+        printf("  Max SGE per WR:              %d\n", dev_attr.max_sge);
+        printf("  Max CQ count:                %d\n", dev_attr.max_cq);
+        printf("  Max CQE per CQ:              %d\n", dev_attr.max_cqe);
+        printf("  Max SRQ count:               %d\n", dev_attr.max_srq);
+        printf("  Max WR per SRQ:              %d\n", dev_attr.max_srq_wr);
+        printf("  --- Memory Region ---\n");
+        printf("  Max MR count:                %d\n", dev_attr.max_mr);
+        printf("  Max MR size:                 %lu bytes\n", (unsigned long)dev_attr.max_mr_size);
+        printf("  Max PD count:                %d\n", dev_attr.max_pd);
+        printf("  Page size mask:              0x%lx\n", (unsigned long)dev_attr.page_size_cap);
+        printf("  --- Atomic Operations ---\n");
+        printf("  Atomic capability:           ");
         switch (dev_attr.atomic_cap) {
-        case IBV_ATOMIC_NONE:  printf("NONE (不支持)\n"); break;
-        case IBV_ATOMIC_HCA:   printf("HCA (仅本 HCA 内原子)\n"); break;
-        case IBV_ATOMIC_GLOB:  printf("GLOBAL (全局原子)\n"); break;
+        case IBV_ATOMIC_NONE:  printf("NONE (not supported)\n"); break;
+        case IBV_ATOMIC_HCA:   printf("HCA (atomic within HCA only)\n"); break;
+        case IBV_ATOMIC_GLOB:  printf("GLOBAL (global atomic)\n"); break;
         default:               printf("%d\n", dev_attr.atomic_cap); break;
         }
-        printf("  最大 QP RD 原子操作数:      %d\n", dev_attr.max_qp_rd_atom);
-        printf("  最大 QP INIT RD 原子数:     %d\n", dev_attr.max_qp_init_rd_atom);
-        printf("  --- 其他 ---\n");
-        printf("  最大 AH 数量:               %d\n", dev_attr.max_ah);
-        printf("  最大多播组数:               %d\n", dev_attr.max_mcast_grp);
-        printf("  每个多播组最大 QP 数:       %d\n", dev_attr.max_mcast_qp_attach);
+        printf("  Max QP RD atomic ops:        %d\n", dev_attr.max_qp_rd_atom);
+        printf("  Max QP INIT RD atomic:       %d\n", dev_attr.max_qp_init_rd_atom);
+        printf("  --- Other ---\n");
+        printf("  Max AH count:                %d\n", dev_attr.max_ah);
+        printf("  Max multicast group count:   %d\n", dev_attr.max_mcast_grp);
+        printf("  Max QP per multicast group:  %d\n", dev_attr.max_mcast_qp_attach);
     } else {
-        perror("  ibv_query_device 失败");
+        perror("  ibv_query_device failed");
     }
 
-    /* ========== 步骤2b: 查询所有端口属性 (ibv_query_port) ========== */
-    printf("\n[步骤2b] 查询端口属性 (ibv_query_port)\n");
+    /* ========== Step 2b: Query all port attributes (ibv_query_port) ========== */
+    printf("\n[Step 2b] Query port attributes (ibv_query_port)\n");
     int phys_port_cnt = (ibv_query_device(context, &dev_attr) == 0)
                         ? dev_attr.phys_port_cnt : 1;
     for (int port = 1; port <= phys_port_cnt; port++) {
         struct ibv_port_attr port_attr;
         if (ibv_query_port(context, port, &port_attr) == 0) {
-            printf("  --- 端口 %d ---\n", port);
-            printf("  状态:          ");
+            printf("  --- Port %d ---\n", port);
+            printf("  State:         ");
             switch (port_attr.state) {
             case IBV_PORT_DOWN:    printf("DOWN\n"); break;
             case IBV_PORT_INIT:    printf("INIT\n"); break;
@@ -123,7 +123,7 @@ int main(int argc, char *argv[])
             case IBV_PORT_ACTIVE:  printf("ACTIVE\n"); break;
             default:               printf("%d\n", port_attr.state); break;
             }
-            printf("  最大 MTU:      ");
+            printf("  Max MTU:       ");
             switch (port_attr.max_mtu) {
             case IBV_MTU_256:  printf("256\n"); break;
             case IBV_MTU_512:  printf("512\n"); break;
@@ -132,7 +132,7 @@ int main(int argc, char *argv[])
             case IBV_MTU_4096: printf("4096\n"); break;
             default:           printf("%d\n", port_attr.max_mtu); break;
             }
-            printf("  活动 MTU:      ");
+            printf("  Active MTU:    ");
             switch (port_attr.active_mtu) {
             case IBV_MTU_256:  printf("256\n"); break;
             case IBV_MTU_512:  printf("512\n"); break;
@@ -141,66 +141,66 @@ int main(int argc, char *argv[])
             case IBV_MTU_4096: printf("4096\n"); break;
             default:           printf("%d\n", port_attr.active_mtu); break;
             }
-            printf("  链路层:        %s\n",
+            printf("  Link layer:    %s\n",
                    port_attr.link_layer == IBV_LINK_LAYER_INFINIBAND ? "InfiniBand" :
                    port_attr.link_layer == IBV_LINK_LAYER_ETHERNET   ? "Ethernet (RoCE)" :
                    "Unknown");
             printf("  LID:           %u%s\n", port_attr.lid,
-                   port_attr.lid == 0 ? " (RoCE 模式, 需用 GID 寻址)" : "");
+                   port_attr.lid == 0 ? " (RoCE mode, need GID for addressing)" : "");
             printf("  SM LID:        %u\n", port_attr.sm_lid);
-            printf("  GID 表大小:    %d\n", port_attr.gid_tbl_len);
-            printf("  P_Key 表大小:  %u\n", port_attr.pkey_tbl_len);
-            printf("  活动速率:      width=%d, speed=%d\n",
+            printf("  GID table size:    %d\n", port_attr.gid_tbl_len);
+            printf("  P_Key table size:  %u\n", port_attr.pkey_tbl_len);
+            printf("  Active speed:      width=%d, speed=%d\n",
                    port_attr.active_width, port_attr.active_speed);
         } else {
-            printf("  端口 %d 查询失败\n", port);
+            printf("  Port %d query failed\n", port);
         }
     }
 
-    /* ========== 步骤3: 分配保护域(PD) ========== */
-    printf("\n[步骤3] 分配保护域(PD)\n");
+    /* ========== Step 3: Allocate Protection Domain (PD) ========== */
+    printf("\n[Step 3] Allocate Protection Domain (PD)\n");
     pd = ibv_alloc_pd(context);
     if (!pd) {
-        perror("  ibv_alloc_pd 失败");
+        perror("  ibv_alloc_pd failed");
         goto cleanup;
     }
-    printf("  PD分配成功, handle=%d\n", pd->handle);
-    
-    /* ========== 步骤4: 注册内存区域(MR) ========== */
-    printf("\n[步骤4] 注册内存区域(MR)\n");
+    printf("  PD allocated successfully, handle=%d\n", pd->handle);
+
+    /* ========== Step 4: Register Memory Region (MR) ========== */
+    printf("\n[Step 4] Register Memory Region (MR)\n");
     buffer = malloc(BUFFER_SIZE);
     if (!buffer) {
-        perror("  malloc 失败");
+        perror("  malloc failed");
         goto cleanup;
     }
     memset(buffer, 0, BUFFER_SIZE);
-    
-    mr = ibv_reg_mr(pd, buffer, BUFFER_SIZE, 
+
+    mr = ibv_reg_mr(pd, buffer, BUFFER_SIZE,
                      IBV_ACCESS_LOCAL_WRITE |
                      IBV_ACCESS_REMOTE_READ |
                      IBV_ACCESS_REMOTE_WRITE);
     if (!mr) {
-        perror("  ibv_reg_mr 失败");
+        perror("  ibv_reg_mr failed");
         goto cleanup;
     }
-    printf("  MR注册成功\n");
-    printf("    lkey=0x%x (本地访问)\n", mr->lkey);
-    printf("    rkey=0x%x (远程访问)\n", mr->rkey);
-    printf("    虚拟地址=%p\n", mr->addr);
-    printf("    长度=%d\n", mr->length);
-    
-    /* ========== 步骤5: 创建完成队列(CQ) ========== */
-    printf("\n[步骤5] 创建完成队列(CQ)\n");
+    printf("  MR registered successfully\n");
+    printf("    lkey=0x%x (local access)\n", mr->lkey);
+    printf("    rkey=0x%x (remote access)\n", mr->rkey);
+    printf("    virtual address=%p\n", mr->addr);
+    printf("    length=%d\n", mr->length);
+
+    /* ========== Step 5: Create Completion Queue (CQ) ========== */
+    printf("\n[Step 5] Create Completion Queue (CQ)\n");
     cq = ibv_create_cq(context, 128, NULL, NULL, 0);
     if (!cq) {
-        perror("  ibv_create_cq 失败");
+        perror("  ibv_create_cq failed");
         goto cleanup;
     }
-    printf("  CQ创建成功, 大小=%d\n", 128);
+    printf("  CQ created successfully, size=%d\n", 128);
     printf("    cq_handle=%d\n", cq->handle);
-    
-    /* ========== 步骤6: 创建队列对(QP) ========== */
-    printf("\n[步骤6] 创建队列对(QP)\n");
+
+    /* ========== Step 6: Create Queue Pair (QP) ========== */
+    printf("\n[Step 6] Create Queue Pair (QP)\n");
     struct ibv_qp_init_attr qp_init_attr = {
         .send_cq = cq,
         .recv_cq = cq,
@@ -212,58 +212,58 @@ int main(int argc, char *argv[])
             .max_recv_sge = 1,
         },
     };
-    
+
     qp = ibv_create_qp(pd, &qp_init_attr);
     if (!qp) {
-        perror("  ibv_create_qp 失败");
+        perror("  ibv_create_qp failed");
         goto cleanup;
     }
-    printf("  QP创建成功\n");
-    printf("    QP号=%u\n", qp->qp_num);
-    printf("    状态=RESET (刚创建的 QP 处于 RESET 状态)\n");
-    
-    printf("\n=== 所有资源初始化成功 ===\n\n");
-    
-    /* 打印资源关系 */
-    printf("资源关系:\n");
+    printf("  QP created successfully\n");
+    printf("    QP number=%u\n", qp->qp_num);
+    printf("    state=RESET (newly created QP is in RESET state)\n");
+
+    printf("\n=== All resources initialized successfully ===\n\n");
+
+    /* Print resource relationships */
+    printf("Resource relationships:\n");
     printf("  Device -> Context (ibv_open_device)\n");
     printf("  Context -> PD (ibv_alloc_pd)\n");
-    printf("  PD -> MR (ibv_reg_mr) - 用于内存注册\n");
-    printf("  Context -> CQ (ibv_create_cq) - 用于完成通知\n");
-    printf("  PD + CQ -> QP (ibv_create_qp) - 用于通信\n");
-    
+    printf("  PD -> MR (ibv_reg_mr) - for memory registration\n");
+    printf("  Context -> CQ (ibv_create_cq) - for completion notification\n");
+    printf("  PD + CQ -> QP (ibv_create_qp) - for communication\n");
+
 cleanup:
-    /* 逆序释放资源 */
-    printf("\n[清理] 释放资源...\n");
-    
+    /* Release resources in reverse order */
+    printf("\n[Cleanup] Releasing resources...\n");
+
     if (qp) {
         ibv_destroy_qp(qp);
-        printf("  QP已销毁\n");
+        printf("  QP destroyed\n");
     }
     if (cq) {
         ibv_destroy_cq(cq);
-        printf("  CQ已销毁\n");
+        printf("  CQ destroyed\n");
     }
     if (mr) {
         ibv_dereg_mr(mr);
-        printf("  MR已注销\n");
+        printf("  MR deregistered\n");
     }
     if (buffer) {
         free(buffer);
     }
     if (pd) {
         ibv_dealloc_pd(pd);
-        printf("  PD已释放\n");
+        printf("  PD deallocated\n");
     }
     if (context) {
         ibv_close_device(context);
-        printf("  设备已关闭\n");
+        printf("  Device closed\n");
     }
     if (device_list) {
         ibv_free_device_list(device_list);
-        printf("  设备列表已释放\n");
+        printf("  Device list freed\n");
     }
-    
-    printf("\n程序结束\n");
+
+    printf("\nProgram finished\n");
     return 0;
 }

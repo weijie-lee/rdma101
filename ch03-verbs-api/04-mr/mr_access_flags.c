@@ -1,13 +1,13 @@
 /**
- * MR 访问标志 (Access Flags) 演示
+ * MR Access Flags Demo
  *
- * 本程序演示 ibv_reg_mr() 中不同访问标志的作用:
- *   1. 注册多种标志组合的 MR, 打印 lkey/rkey
- *   2. 展示: LOCAL_WRITE only, LOCAL_WRITE+REMOTE_READ, +REMOTE_WRITE, +REMOTE_ATOMIC
- *   3. 使用 loopback QP 测试: 尝试 RDMA Write 到只读 MR → 产生保护错误
- *   4. 打印系统内存锁定限制信息 (ulimit -l, nr_hugepages)
+ * This program demonstrates the effects of different access flags in ibv_reg_mr():
+ *   1. Register MRs with various flag combinations, print lkey/rkey
+ *   2. Show: LOCAL_WRITE only, LOCAL_WRITE+REMOTE_READ, +REMOTE_WRITE, +REMOTE_ATOMIC
+ *   3. Use loopback QP to test: attempt RDMA Write to read-only MR -> produces protection error
+ *   4. Print system memory locking limit info (ulimit -l, nr_hugepages)
  *
- * 编译: gcc -o mr_access_flags mr_access_flags.c -I../../common ../../common/librdma_utils.a -libverbs
+ * Compile: gcc -o mr_access_flags mr_access_flags.c -I../../common ../../common/librdma_utils.a -libverbs
  */
 
 #include <stdio.h>
@@ -23,30 +23,30 @@
 #define CQ_DEPTH    32
 
 /**
- * 辅助函数: 将 MR 访问标志转为可读字符串
+ * Helper function: convert MR access flags to readable string
  */
 static void print_access_flags(int flags)
 {
-    printf("    标志组合: ");
+    printf("    Flag combination: ");
     if (flags & IBV_ACCESS_LOCAL_WRITE)   printf("LOCAL_WRITE ");
     if (flags & IBV_ACCESS_REMOTE_WRITE)  printf("REMOTE_WRITE ");
     if (flags & IBV_ACCESS_REMOTE_READ)   printf("REMOTE_READ ");
     if (flags & IBV_ACCESS_REMOTE_ATOMIC) printf("REMOTE_ATOMIC ");
-    if (flags == 0)                        printf("(无 — 仅本地只读)");
+    if (flags == 0)                        printf("(none -- local read-only)");
     printf("\n");
 }
 
 /**
- * 辅助函数: 打印系统内存锁定限制
+ * Helper function: print system memory locking limits
  */
 static void print_memory_limits(void)
 {
     FILE *fp;
     char line[256];
 
-    printf("\n=== 系统内存锁定信息 ===\n");
+    printf("\n=== System Memory Locking Info ===\n");
 
-    /* ulimit -l (通过 /proc/self/limits 读取) */
+    /* ulimit -l (read via /proc/self/limits) */
     fp = fopen("/proc/self/limits", "r");
     if (fp) {
         while (fgets(line, sizeof(line), fp)) {
@@ -67,72 +67,72 @@ static void print_memory_limits(void)
         fclose(fp);
     }
 
-    printf("  提示: MR 注册需要锁定物理内存 (pinned memory)\n");
-    printf("  如果 ulimit -l 太小, ibv_reg_mr 会失败 (errno=ENOMEM)\n");
-    printf("  解决: ulimit -l unlimited 或修改 /etc/security/limits.conf\n");
+    printf("  Note: MR registration requires pinned physical memory\n");
+    printf("  If ulimit -l is too small, ibv_reg_mr will fail (errno=ENOMEM)\n");
+    printf("  Fix: ulimit -l unlimited or modify /etc/security/limits.conf\n");
     printf("============================\n\n");
 }
 
 int main(int argc, char *argv[])
 {
-    /* 资源声明 */
+    /* Resource declarations */
     struct ibv_device **dev_list = NULL;
     struct ibv_context *ctx      = NULL;
     struct ibv_pd      *pd       = NULL;
     struct ibv_cq      *cq       = NULL;
     struct ibv_qp      *qp       = NULL;
-    struct ibv_mr      *mr_arr[4] = {NULL};  /* 4 种不同标志的 MR */
+    struct ibv_mr      *mr_arr[4] = {NULL};  /* 4 MRs with different flags */
     char               *buf_arr[4] = {NULL};
-    struct ibv_mr      *mr_src   = NULL;     /* loopback 测试的源 MR */
+    struct ibv_mr      *mr_src   = NULL;     /* Source MR for loopback test */
     char               *buf_src  = NULL;
     int                 num_devices;
     int                 ret;
     int                 i;
 
     printf("============================================\n");
-    printf("  MR 访问标志 (Access Flags) 演示\n");
+    printf("  MR Access Flags Demo\n");
     printf("============================================\n\n");
 
-    /* 打印系统内存限制信息 */
+    /* Print system memory limits */
     print_memory_limits();
 
-    /* ========== 打开设备, 创建 PD ========== */
-    printf("[步骤1] 打开设备并创建 PD\n");
+    /* ========== Open device, create PD ========== */
+    printf("[Step 1] Open device and create PD\n");
     dev_list = ibv_get_device_list(&num_devices);
-    CHECK_NULL(dev_list, "获取设备列表失败");
+    CHECK_NULL(dev_list, "Failed to get device list");
     if (num_devices == 0) {
-        fprintf(stderr, "[错误] 未发现 RDMA 设备\n");
+        fprintf(stderr, "[Error] No RDMA devices found\n");
         goto cleanup;
     }
     ctx = ibv_open_device(dev_list[0]);
-    CHECK_NULL(ctx, "打开设备失败");
-    printf("  设备: %s\n", ibv_get_device_name(dev_list[0]));
+    CHECK_NULL(ctx, "Failed to open device");
+    printf("  Device: %s\n", ibv_get_device_name(dev_list[0]));
 
     pd = ibv_alloc_pd(ctx);
-    CHECK_NULL(pd, "分配 PD 失败");
-    printf("  PD 分配成功\n\n");
+    CHECK_NULL(pd, "Failed to allocate PD");
+    printf("  PD allocated successfully\n\n");
 
-    /* ========== 步骤 2: 注册不同标志组合的 MR ========== */
-    printf("[步骤2] 注册不同访问标志的 MR\n");
+    /* ========== Step 2: Register MRs with different flag combinations ========== */
+    printf("[Step 2] Register MRs with different access flags\n");
     printf("========================================\n");
 
-    /* 定义 4 种标志组合 */
+    /* Define 4 flag combinations */
     int flag_combos[] = {
-        /* 组合 1: 仅本地写 (最小权限, 适用于仅本地使用的缓冲区) */
+        /* Combo 1: Local write only (minimal permission, for locally-used buffers) */
         IBV_ACCESS_LOCAL_WRITE,
-        /* 组合 2: 本地写 + 远端读 (允许对端 RDMA Read 此 MR) */
+        /* Combo 2: Local write + remote read (allow peer to RDMA Read this MR) */
         IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ,
-        /* 组合 3: 本地写 + 远端写 (允许对端 RDMA Write 此 MR) */
+        /* Combo 3: Local write + remote write (allow peer to RDMA Write this MR) */
         IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE,
-        /* 组合 4: 全部权限 (含远端原子操作) */
+        /* Combo 4: Full permissions (including remote atomic operations) */
         IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
         IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC,
     };
     const char *combo_desc[] = {
-        "仅本地写 (LOCAL_WRITE)",
-        "本地写 + 远端读 (LOCAL_WRITE | REMOTE_READ)",
-        "本地写 + 远端写 (LOCAL_WRITE | REMOTE_WRITE)",
-        "全部权限 (LOCAL_WRITE | REMOTE_READ | REMOTE_WRITE | REMOTE_ATOMIC)",
+        "Local write only (LOCAL_WRITE)",
+        "Local write + remote read (LOCAL_WRITE | REMOTE_READ)",
+        "Local write + remote write (LOCAL_WRITE | REMOTE_WRITE)",
+        "Full permissions (LOCAL_WRITE | REMOTE_READ | REMOTE_WRITE | REMOTE_ATOMIC)",
     };
 
     for (i = 0; i < 4; i++) {
@@ -140,28 +140,28 @@ int main(int argc, char *argv[])
         print_access_flags(flag_combos[i]);
 
         buf_arr[i] = malloc(BUFFER_SIZE);
-        CHECK_NULL(buf_arr[i], "malloc 失败");
+        CHECK_NULL(buf_arr[i], "malloc failed");
         memset(buf_arr[i], 'A' + i, BUFFER_SIZE);
 
         mr_arr[i] = ibv_reg_mr(pd, buf_arr[i], BUFFER_SIZE, flag_combos[i]);
-        CHECK_NULL(mr_arr[i], "ibv_reg_mr 失败");
+        CHECK_NULL(mr_arr[i], "ibv_reg_mr failed");
 
-        printf("    lkey = 0x%08x (本地访问密钥)\n", mr_arr[i]->lkey);
-        printf("    rkey = 0x%08x (远程访问密钥)\n", mr_arr[i]->rkey);
+        printf("    lkey = 0x%08x (local access key)\n", mr_arr[i]->lkey);
+        printf("    rkey = 0x%08x (remote access key)\n", mr_arr[i]->rkey);
         printf("    addr = %p, length = %zu\n",
                mr_arr[i]->addr, (size_t)mr_arr[i]->length);
     }
 
-    printf("\n  ★ 关键观察: 每个 MR 的 lkey/rkey 值不同\n");
-    printf("  ★ lkey 用于本地 WR 的 SGE, rkey 需告知对端用于 RDMA Read/Write\n");
-    printf("  ★ REMOTE_* 标志控制对端是否可以 RDMA Read/Write/Atomic 此区域\n\n");
+    printf("\n  Key observations: Each MR has different lkey/rkey values\n");
+    printf("  lkey is used in SGE for local WRs, rkey must be shared with peer for RDMA Read/Write\n");
+    printf("  REMOTE_* flags control whether the peer can RDMA Read/Write/Atomic this region\n\n");
 
-    /* ========== 步骤 3: 创建 loopback QP 测试 RDMA Write ========== */
-    printf("[步骤3] 创建 loopback QP, 测试 RDMA Write 权限检查\n");
+    /* ========== Step 3: Create loopback QP to test RDMA Write ========== */
+    printf("[Step 3] Create loopback QP, test RDMA Write permission check\n");
     printf("========================================\n\n");
 
     cq = ibv_create_cq(ctx, CQ_DEPTH, NULL, NULL, 0);
-    CHECK_NULL(cq, "创建 CQ 失败");
+    CHECK_NULL(cq, "Failed to create CQ");
 
     struct ibv_qp_init_attr qp_init = {
         .send_cq = cq,
@@ -175,43 +175,43 @@ int main(int argc, char *argv[])
         },
     };
     qp = ibv_create_qp(pd, &qp_init);
-    CHECK_NULL(qp, "创建 QP 失败");
-    printf("  QP 创建成功, qp_num=%u\n", qp->qp_num);
+    CHECK_NULL(qp, "Failed to create QP");
+    printf("  QP created successfully, qp_num=%u\n", qp->qp_num);
 
-    /* 准备源 MR (用于 RDMA Write 的源数据) */
+    /* Prepare source MR (source data for RDMA Write) */
     buf_src = malloc(BUFFER_SIZE);
-    CHECK_NULL(buf_src, "malloc buf_src 失败");
+    CHECK_NULL(buf_src, "malloc buf_src failed");
     memset(buf_src, 'S', BUFFER_SIZE);
     mr_src = ibv_reg_mr(pd, buf_src, BUFFER_SIZE, IBV_ACCESS_LOCAL_WRITE);
-    CHECK_NULL(mr_src, "注册源 MR 失败");
+    CHECK_NULL(mr_src, "Failed to register source MR");
 
-    /* 准备 loopback 端点信息 */
+    /* Prepare loopback endpoint info */
     struct rdma_endpoint local_ep;
     ret = fill_local_endpoint(ctx, qp, PORT_NUM, RDMA_DEFAULT_GID_INDEX, &local_ep);
-    CHECK_ERRNO(ret, "填充端点信息失败");
+    CHECK_ERRNO(ret, "Failed to fill endpoint info");
 
-    /* 检测传输类型 */
+    /* Detect transport type */
     enum rdma_transport transport = detect_transport(ctx, PORT_NUM);
     int is_roce = (transport == RDMA_TRANSPORT_ROCE);
-    printf("  传输类型: %s\n", transport_str(transport));
+    printf("  Transport type: %s\n", transport_str(transport));
 
-    /* 全部权限连接 QP (loopback) */
+    /* Connect QP with full permissions (loopback) */
     int full_access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
                       IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC;
     ret = qp_full_connect(qp, &local_ep, PORT_NUM, is_roce, full_access);
     if (ret != 0) {
-        printf("  QP 连接失败 (loopback), 跳过 RDMA Write 测试\n");
-        printf("  → 提示: 确保端口状态为 ACTIVE\n");
+        printf("  QP connection failed (loopback), skipping RDMA Write test\n");
+        printf("  -> Hint: Ensure port state is ACTIVE\n");
         goto skip_rdma_test;
     }
-    printf("  QP 已连接 (loopback, RESET→INIT→RTR→RTS)\n\n");
+    printf("  QP connected (loopback, RESET->INIT->RTR->RTS)\n\n");
 
     /*
-     * 测试: RDMA Write 到 MR[0] (仅 LOCAL_WRITE, 没有 REMOTE_WRITE 权限)
-     * 预期: HCA 产生 IBV_WC_REM_ACCESS_ERR (Remote Access Error)
+     * Test: RDMA Write to MR[0] (LOCAL_WRITE only, no REMOTE_WRITE permission)
+     * Expected: HCA produces IBV_WC_REM_ACCESS_ERR (Remote Access Error)
      */
-    printf("  测试: RDMA Write → MR[0] (仅 LOCAL_WRITE, 无 REMOTE_WRITE)\n");
-    printf("  目标 rkey=0x%08x, 预期产生 Remote Access Error...\n", mr_arr[0]->rkey);
+    printf("  Test: RDMA Write -> MR[0] (LOCAL_WRITE only, no REMOTE_WRITE)\n");
+    printf("  Target rkey=0x%08x, expecting Remote Access Error...\n", mr_arr[0]->rkey);
 
     struct ibv_sge sge_test = {
         .addr   = (uintptr_t)buf_src,
@@ -226,55 +226,55 @@ int main(int argc, char *argv[])
         .send_flags = IBV_SEND_SIGNALED,
         .wr.rdma = {
             .remote_addr = (uintptr_t)buf_arr[0],
-            .rkey        = mr_arr[0]->rkey,  /* 目标 MR 无 REMOTE_WRITE */
+            .rkey        = mr_arr[0]->rkey,  /* Target MR has no REMOTE_WRITE */
         },
     };
     struct ibv_send_wr *bad_wr = NULL;
 
     ret = ibv_post_send(qp, &wr_test, &bad_wr);
     if (ret != 0) {
-        printf("  ibv_post_send 失败: %s\n", strerror(errno));
+        printf("  ibv_post_send failed: %s\n", strerror(errno));
     } else {
-        /* 轮询 CQ 获取结果 */
+        /* Poll CQ for result */
         struct ibv_wc wc;
         int ne;
         int poll_count = 0;
         while (poll_count < 1000000) {
             ne = ibv_poll_cq(cq, 1, &wc);
             if (ne > 0) {
-                printf("  CQ 结果: status=%s (%d)\n",
+                printf("  CQ result: status=%s (%d)\n",
                        ibv_wc_status_str(wc.status), wc.status);
                 if (wc.status != IBV_WC_SUCCESS) {
-                    printf("  ✓ 预期的权限错误! RDMA Write 被拒绝 (MR 无 REMOTE_WRITE)\n");
+                    printf("  Expected permission error! RDMA Write rejected (MR has no REMOTE_WRITE)\n");
                 }
                 break;
             }
             if (ne < 0) {
-                printf("  ibv_poll_cq 出错\n");
+                printf("  ibv_poll_cq error\n");
                 break;
             }
             poll_count++;
         }
         if (poll_count >= 1000000) {
-            printf("  轮询超时, 未收到完成事件\n");
+            printf("  Polling timed out, no completion event received\n");
         }
     }
 
 skip_rdma_test:
-    /* ========== 总结 ========== */
+    /* ========== Summary ========== */
     printf("\n============================================\n");
-    printf("  MR 访问标志总结\n");
+    printf("  MR Access Flags Summary\n");
     printf("============================================\n");
-    printf("  IBV_ACCESS_LOCAL_WRITE:    允许本地 QP 写入此 MR\n");
-    printf("  IBV_ACCESS_REMOTE_READ:    允许对端 RDMA Read 此 MR\n");
-    printf("  IBV_ACCESS_REMOTE_WRITE:   允许对端 RDMA Write 此 MR\n");
-    printf("  IBV_ACCESS_REMOTE_ATOMIC:  允许对端对此 MR 执行原子操作\n");
-    printf("  ★ 最小权限原则: 只开启实际需要的标志\n");
-    printf("  ★ REMOTE_WRITE/REMOTE_ATOMIC 都隐含需要 LOCAL_WRITE\n");
-    printf("  ★ 注册 MR 会锁定物理页, 注意 ulimit -l 限制\n\n");
+    printf("  IBV_ACCESS_LOCAL_WRITE:    Allow local QP to write to this MR\n");
+    printf("  IBV_ACCESS_REMOTE_READ:    Allow peer to RDMA Read this MR\n");
+    printf("  IBV_ACCESS_REMOTE_WRITE:   Allow peer to RDMA Write this MR\n");
+    printf("  IBV_ACCESS_REMOTE_ATOMIC:  Allow peer to perform atomic operations on this MR\n");
+    printf("  Least privilege principle: Only enable flags that are actually needed\n");
+    printf("  REMOTE_WRITE/REMOTE_ATOMIC both implicitly require LOCAL_WRITE\n");
+    printf("  Registering MR pins physical pages, watch ulimit -l limits\n\n");
 
 cleanup:
-    printf("[清理] 释放资源...\n");
+    printf("[Cleanup] Releasing resources...\n");
     if (qp)     ibv_destroy_qp(qp);
     if (cq)     ibv_destroy_cq(cq);
     if (mr_src) ibv_dereg_mr(mr_src);
@@ -287,6 +287,6 @@ cleanup:
     if (ctx)      ibv_close_device(ctx);
     if (dev_list) ibv_free_device_list(dev_list);
 
-    printf("  完成\n");
+    printf("  Done\n");
     return 0;
 }

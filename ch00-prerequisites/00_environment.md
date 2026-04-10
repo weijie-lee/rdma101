@@ -1,86 +1,86 @@
-# 环境搭建指南 — SoftRoCE 完全手册
+# Environment Setup Guide — SoftRoCE Complete Manual
 
-## 学习目标
+## Learning Objectives
 
-| 目标 | 说明 |
-|------|------|
-| 理解 SoftRoCE | 什么是 SoftRoCE，为什么它能代替真实 RDMA 硬件进行学习 |
-| 一键配置环境 | 使用脚本快速搭建 SoftRoCE 开发环境 |
-| 理解关键差异 | SoftRoCE vs 真实硬件的区别（LID=0、GID、MTU） |
-| 掌握故障排查 | 解决 SoftRoCE 环境下的常见问题 |
-
----
-
-## 1. SoftRoCE 概述
-
-### 什么是 SoftRoCE？
-
-**SoftRoCE (Soft RDMA over Converged Ethernet)** 是 Linux 内核中的软件 RDMA 实现，
-通过 `rdma_rxe` 内核模块，在**普通以太网网卡**上模拟完整的 RDMA 功能。
-
-```
-┌─────────────────────────────────────────────────────┐
-│              真实 RDMA 硬件 (Mellanox ConnectX)       │
-│  ┌──────────┐    ┌───────────┐    ┌──────────────┐  │
-│  │ Verbs API │ → │ 驱动(mlx5) │ → │ 硬件网卡 (HCA)│  │
-│  └──────────┘    └───────────┘    └──────────────┘  │
-│                                                     │
-│  延迟: ~1-2 μs    带宽: 100-400 Gbps               │
-└─────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────┐
-│              SoftRoCE (软件模拟)                      │
-│  ┌──────────┐    ┌───────────┐    ┌──────────────┐  │
-│  │ Verbs API │ → │ rdma_rxe  │ → │ 普通以太网网卡 │  │
-│  └──────────┘    └───────────┘    └──────────────┘  │
-│                                                     │
-│  延迟: ~50-100 μs    带宽: 取决于网卡 (1-25 Gbps)   │
-└─────────────────────────────────────────────────────┘
-```
-
-### 为什么用 SoftRoCE 学习？
-
-| 优势 | 说明 |
-|------|------|
-| **零成本** | 无需购买 RDMA 网卡和交换机 |
-| **API 完全一致** | 同一套 Verbs API 代码，行为完全一致 |
-| **单机学习** | 一台笔记本/虚拟机即可完成所有练习 |
-| **真实验证** | 所有代码在真实硬件上无需修改即可运行 |
-
-### SoftRoCE vs 真实硬件的区别
-
-| 项目 | SoftRoCE | 真实 RDMA 硬件 |
-|------|----------|---------------|
-| 延迟 | ~50-100 μs (走内核协议栈) | ~1-2 μs (硬件直通) |
-| 带宽 | 受限于普通网卡 | 100-400+ Gbps |
-| CPU 占用 | 高 (软件处理) | 低 (硬件卸载) |
-| **LID** | **始终为 0** | IB 模式由 SM 分配 |
-| **GID** | 从网卡 IP 地址生成 | 从 HCA GUID 生成 |
-| 链路层 | Ethernet | IB 或 Ethernet |
-| Kernel Bypass | 否 (仍经过内核) | 是 (真正旁路内核) |
-| **API 行为** | **完全一致** | **完全一致** |
-
-> **关键**: 虽然性能不同，但 **API 编程接口和行为完全一致**。
-> 在 SoftRoCE 上写的代码，直接放到真实硬件上就能运行。
+| Objective | Description |
+|-----------|-------------|
+| Understand SoftRoCE | What is SoftRoCE and why it can replace real RDMA hardware for learning |
+| One-click environment setup | Use scripts to quickly set up the SoftRoCE development environment |
+| Understand key differences | SoftRoCE vs real hardware differences (LID=0, GID, MTU) |
+| Master troubleshooting | Solve common issues in the SoftRoCE environment |
 
 ---
 
-## 2. 一键配置
+## 1. SoftRoCE Overview
 
-### 自动配置（推荐）
+### What is SoftRoCE?
+
+**SoftRoCE (Soft RDMA over Converged Ethernet)** is a software RDMA implementation in the Linux kernel.
+Through the `rdma_rxe` kernel module, it simulates full RDMA functionality on **regular Ethernet NICs**.
+
+```
+┌─────────────────────────────────────────────────────┐
+│              Real RDMA Hardware (Mellanox ConnectX)   │
+│  ┌──────────┐    ┌────────────┐    ┌──────────────┐ │
+│  │ Verbs API │ → │ Driver(mlx5)│ → │ HW NIC (HCA) │ │
+│  └──────────┘    └────────────┘    └──────────────┘ │
+│                                                     │
+│  Latency: ~1-2 us    Bandwidth: 100-400 Gbps       │
+└─────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────┐
+│              SoftRoCE (Software Simulation)           │
+│  ┌──────────┐    ┌───────────┐    ┌──────────────┐  │
+│  │ Verbs API │ → │ rdma_rxe  │ → │ Regular NIC  │   │
+│  └──────────┘    └───────────┘    └──────────────┘  │
+│                                                     │
+│  Latency: ~50-100 us    Bandwidth: depends on NIC (1-25 Gbps) │
+└─────────────────────────────────────────────────────┘
+```
+
+### Why Use SoftRoCE for Learning?
+
+| Advantage | Description |
+|-----------|-------------|
+| **Zero cost** | No need to purchase RDMA NICs and switches |
+| **Identical API** | Same Verbs API code, fully consistent behavior |
+| **Single-machine learning** | One laptop/VM is enough to complete all exercises |
+| **Real validation** | All code runs on real hardware without modification |
+
+### SoftRoCE vs Real Hardware Differences
+
+| Item | SoftRoCE | Real RDMA Hardware |
+|------|----------|-------------------|
+| Latency | ~50-100 us (goes through kernel stack) | ~1-2 us (hardware direct) |
+| Bandwidth | Limited by regular NIC | 100-400+ Gbps |
+| CPU usage | High (software processing) | Low (hardware offload) |
+| **LID** | **Always 0** | Assigned by SM in IB mode |
+| **GID** | Generated from NIC IP address | Generated from HCA GUID |
+| Link layer | Ethernet | IB or Ethernet |
+| Kernel Bypass | No (still goes through kernel) | Yes (true kernel bypass) |
+| **API behavior** | **Fully consistent** | **Fully consistent** |
+
+> **Key point**: Although performance differs, the **API programming interface and behavior are fully consistent**.
+> Code written on SoftRoCE can run directly on real hardware.
+
+---
+
+## 2. One-Click Setup
+
+### Automatic Setup (Recommended)
 
 ```bash
-# 一键配置 SoftRoCE 环境
+# One-click SoftRoCE environment setup
 sudo ./scripts/setup_softrce.sh
 ```
 
-脚本会自动完成：安装依赖 → 加载模块 → 创建设备 → 设置 ulimit → 验证环境 → 编译项目
+The script automatically completes: Install dependencies -> Load modules -> Create device -> Set ulimit -> Verify environment -> Build project
 
-### 手动配置
+### Manual Setup
 
-如果自动脚本无法运行，按以下步骤手动操作：
+If the automatic script cannot run, follow these steps manually:
 
-#### 步骤 1: 安装依赖
+#### Step 1: Install Dependencies
 
 ```bash
 sudo apt update
@@ -88,152 +88,152 @@ sudo apt install -y libibverbs-dev librdmacm-dev rdma-core \
                     ibverbs-utils perftest build-essential
 ```
 
-#### 步骤 2: 加载内核模块
+#### Step 2: Load Kernel Module
 
 ```bash
-# 加载 SoftRoCE 模块
+# Load SoftRoCE module
 sudo modprobe rdma_rxe
 
-# 验证模块已加载
+# Verify module is loaded
 lsmod | grep rdma_rxe
 ```
 
-#### 步骤 3: 创建 SoftRoCE 设备
+#### Step 3: Create SoftRoCE Device
 
 ```bash
-# 查看可用的网络接口
+# View available network interfaces
 ip link show
 
-# 将 SoftRoCE 绑定到网络接口（替换 eth0 为你的接口名）
+# Bind SoftRoCE to network interface (replace eth0 with your interface name)
 sudo rdma link add rxe0 type rxe netdev eth0
 
-# 验证设备
+# Verify device
 rdma link show
 ibv_devices
 ```
 
-#### 步骤 4: 设置内存锁定
+#### Step 4: Set Memory Locking
 
 ```bash
-# 临时设置（当前 shell）
+# Temporary setting (current shell)
 ulimit -l unlimited
 
-# 永久设置（写入 limits.conf，需重新登录）
+# Permanent setting (write to limits.conf, requires re-login)
 sudo bash -c 'echo "* soft memlock unlimited" >> /etc/security/limits.conf'
 sudo bash -c 'echo "* hard memlock unlimited" >> /etc/security/limits.conf'
 ```
 
-#### 步骤 5: 验证
+#### Step 5: Verify
 
 ```bash
-# 查看设备信息
+# View device information
 ibv_devinfo
 
-# 预期输出中的关键字段:
-#   link_layer: Ethernet    ← SoftRoCE 是以太网链路层
-#   state:      PORT_ACTIVE ← 端口应为活动状态
-#   port_lid:   0           ← RoCE 模式下 LID 始终为 0（正常!）
+# Key fields in expected output:
+#   link_layer: Ethernet    <- SoftRoCE uses Ethernet link layer
+#   state:      PORT_ACTIVE <- Port should be in active state
+#   port_lid:   0           <- LID is always 0 in RoCE mode (normal!)
 ```
 
 ---
 
-## 3. SoftRoCE 关键概念
+## 3. SoftRoCE Key Concepts
 
-### 3.1 LID = 0 是正常的
+### 3.1 LID = 0 is Normal
 
-在 SoftRoCE (RoCE 模式) 下:
+In SoftRoCE (RoCE mode):
 
 ```
 $ ibv_devinfo | grep lid
-    port_lid:  0      ← 这是正常的！RoCE 不使用 LID
-    sm_lid:    0      ← 没有 Subnet Manager（只有 IB 需要）
+    port_lid:  0      <- This is normal! RoCE does not use LID
+    sm_lid:    0      <- No Subnet Manager (only IB needs one)
 ```
 
-**InfiniBand** 使用 **LID (Local Identifier)** 进行子网内寻址（由 Subnet Manager 分配）。
-**RoCE** 使用 **GID (Global Identifier)** 进行寻址（基于 IP 地址生成）。
+**InfiniBand** uses **LID (Local Identifier)** for subnet addressing (assigned by Subnet Manager).
+**RoCE** uses **GID (Global Identifier)** for addressing (generated from IP address).
 
-本教程的所有程序都会自动检测传输层类型，选择正确的寻址方式：
+All programs in this tutorial automatically detect the transport type and choose the correct addressing method:
 
 ```c
-// 自动检测（已内置在所有程序中）
+// Automatic detection (built into all programs)
 enum rdma_transport t = detect_transport(ctx, port);
 if (t == RDMA_TRANSPORT_ROCE) {
-    // 使用 GID 寻址: ah_attr.is_global = 1, grh.dgid = remote_gid
+    // Use GID addressing: ah_attr.is_global = 1, grh.dgid = remote_gid
 } else {
-    // 使用 LID 寻址: ah_attr.dlid = remote_lid
+    // Use LID addressing: ah_attr.dlid = remote_lid
 }
 ```
 
-### 3.2 GID 从 IP 地址生成
+### 3.2 GID is Generated from IP Address
 
-SoftRoCE 的 GID 表中的条目来自网卡的 IP 地址:
+Entries in SoftRoCE's GID table come from the NIC's IP address:
 
 ```bash
-# 查看 GID 表
+# View GID table
 cat /sys/class/infiniband/rxe0/ports/1/gids/0
 
-# 典型输出: fe80:0000:0000:0000:xxxx:xxxx:xxxx:xxxx (link-local IPv6)
-# 或: 0000:0000:0000:0000:0000:ffff:c0a8:0164 (IPv4-mapped, 即 192.168.1.100)
+# Typical output: fe80:0000:0000:0000:xxxx:xxxx:xxxx:xxxx (link-local IPv6)
+# Or: 0000:0000:0000:0000:0000:ffff:c0a8:0164 (IPv4-mapped, i.e. 192.168.1.100)
 ```
 
-**GID 索引选择:**
+**GID Index Selection:**
 
-| GID 索引 | 类型 | 说明 |
-|----------|------|------|
-| 0 | RoCE v1 (link-local) | 仅子网内通信 |
-| 1 | RoCE v2 (IPv4-mapped) | **推荐使用** — 支持 IP 路由 |
-| 2+ | RoCE v2 (IPv6) | 如果配了 IPv6 |
+| GID Index | Type | Description |
+|-----------|------|-------------|
+| 0 | RoCE v1 (link-local) | Subnet-only communication |
+| 1 | RoCE v2 (IPv4-mapped) | **Recommended** — supports IP routing |
+| 2+ | RoCE v2 (IPv6) | If IPv6 is configured |
 
-程序中默认使用 `gid_index = 0`，如需调整可修改 `RDMA_DEFAULT_GID_INDEX`。
+Programs use `gid_index = 0` by default. Adjust `RDMA_DEFAULT_GID_INDEX` if needed.
 
-### 3.3 MTU 注意事项
+### 3.3 MTU Considerations
 
 ```bash
-# 查看 SoftRoCE 的 MTU
+# View SoftRoCE MTU
 ibv_devinfo | grep mtu
 #   max_mtu:    4096
-#   active_mtu: 1024    ← SoftRoCE 默认 MTU
+#   active_mtu: 1024    <- SoftRoCE default MTU
 ```
 
-SoftRoCE 的 active_mtu 受限于底层网卡的 MTU:
-- 普通以太网 MTU = 1500 → RDMA active_mtu ≈ 1024
-- Jumbo Frame MTU = 9000 → RDMA active_mtu ≈ 4096
+SoftRoCE's active_mtu is limited by the underlying NIC's MTU:
+- Regular Ethernet MTU = 1500 -> RDMA active_mtu ~ 1024
+- Jumbo Frame MTU = 9000 -> RDMA active_mtu ~ 4096
 
-本教程程序默认使用 `IBV_MTU_1024`，兼容所有环境。
+Programs in this tutorial use `IBV_MTU_1024` by default, compatible with all environments.
 
-### 3.4 ulimit -l（内存锁定限制）
+### 3.4 ulimit -l (Memory Locking Limit)
 
-RDMA 需要 **pin 内存**（锁定物理内存页，防止被交换出去），
-这要求系统允许进程锁定足够的内存。
+RDMA requires **pinned memory** (locking physical memory pages to prevent swapping),
+which requires the system to allow processes to lock sufficient memory.
 
 ```bash
-# 查看当前限制
+# View current limit
 ulimit -l
-# 如果输出 64 或其他小数字，需要调整
+# If the output is 64 or another small number, adjustment is needed
 
-# 临时调整
+# Temporary adjustment
 ulimit -l unlimited
 
-# 如果报 "Operation not permitted"，说明 hard limit 也需调整
-# 编辑 /etc/security/limits.conf:
+# If you get "Operation not permitted", the hard limit also needs adjustment
+# Edit /etc/security/limits.conf:
 #   * soft memlock unlimited
 #   * hard memlock unlimited
-# 然后重新登录
+# Then re-login
 ```
 
 ---
 
-## 4. 持久化配置
+## 4. Persistent Configuration
 
-默认情况下，SoftRoCE 设备在重启后会消失。要持久化:
+By default, SoftRoCE devices disappear after reboot. To make them persistent:
 
-### 方法 1: 开机自动加载模块
+### Method 1: Auto-load Module at Boot
 
 ```bash
-# 添加到模块自动加载列表
+# Add to module auto-load list
 echo "rdma_rxe" | sudo tee -a /etc/modules-load.d/rdma.conf
 
-# 创建 udev 规则或启动脚本来自动创建 rxe0 设备
+# Create udev rule or startup script to automatically create rxe0 device
 sudo bash -c 'cat > /etc/systemd/system/softrce.service << EOF
 [Unit]
 Description=SoftRoCE Setup
@@ -252,52 +252,52 @@ EOF'
 sudo systemctl enable softrce.service
 ```
 
-### 方法 2: 每次手动创建
+### Method 2: Manual Creation Each Time
 
 ```bash
-# 重启后运行
+# Run after reboot
 sudo modprobe rdma_rxe
 sudo rdma link add rxe0 type rxe netdev eth0
 ```
 
 ---
 
-## 5. 程序运行方式速查表
+## 5. Program Execution Quick Reference
 
-### 单进程程序（直接运行，无需对端）
+### Single-Process Programs (Run directly, no peer needed)
 
-| 程序 | 路径 | 说明 |
-|------|------|------|
-| `hello_rdma` | ch09-quickref/ | 最小 RDMA Hello World |
-| `01_init_resources` | ch03-verbs-api/01-initialization/ | 六步初始化 |
-| `02_multi_device` | ch03-verbs-api/01-initialization/ | 设备枚举 |
-| `qp_state` | ch03-verbs-api/02-qp-state/ | QP 状态机 (loopback) |
-| `01_qp_error_recovery` | ch03-verbs-api/02-qp-state/ | QP 错误恢复 |
-| `pd_isolation` | ch03-verbs-api/03-pd/ | PD 隔离演示 |
-| `mr_access_flags` | ch03-verbs-api/04-mr/ | MR 权限标志 |
-| `mr_multi_reg` | ch03-verbs-api/04-mr/ | 多次注册 MR |
-| `cq_event_driven` | ch03-verbs-api/05-cq/ | 事件驱动 CQ |
-| `cq_overflow` | ch03-verbs-api/05-cq/ | CQ 溢出 |
+| Program | Path | Description |
+|---------|------|-------------|
+| `hello_rdma` | ch09-quickref/ | Minimal RDMA Hello World |
+| `01_init_resources` | ch03-verbs-api/01-initialization/ | Six-step initialization |
+| `02_multi_device` | ch03-verbs-api/01-initialization/ | Device enumeration |
+| `qp_state` | ch03-verbs-api/02-qp-state/ | QP state machine (loopback) |
+| `01_qp_error_recovery` | ch03-verbs-api/02-qp-state/ | QP error recovery |
+| `pd_isolation` | ch03-verbs-api/03-pd/ | PD isolation demo |
+| `mr_access_flags` | ch03-verbs-api/04-mr/ | MR access flags |
+| `mr_multi_reg` | ch03-verbs-api/04-mr/ | Multiple MR registration |
+| `cq_event_driven` | ch03-verbs-api/05-cq/ | Event-driven CQ |
+| `cq_overflow` | ch03-verbs-api/05-cq/ | CQ overflow |
 | `01_loopback_send_recv` | ch05-communication/02-send-recv/ | Send/Recv loopback |
 | `02_sge_demo` | ch05-communication/02-send-recv/ | Scatter-Gather |
-| `ud_loopback` | ch06-connection/03-ud-mode/ | UD 模式 |
-| `inline_data` | ch07-engineering/02-tuning/ | Inline 优化 |
-| `unsignaled_send` | ch07-engineering/02-tuning/ | 无信号发送 |
-| `srq_demo` | ch07-engineering/02-tuning/ | 共享接收队列 |
-| `trigger_errors` | ch07-engineering/04-error-handling/ | 错误触发 |
-| `error_diagnosis` | ch07-engineering/04-error-handling/ | 错误诊断 |
-| `error_cheatsheet` | ch09-quickref/ | 错误速查 |
+| `ud_loopback` | ch06-connection/03-ud-mode/ | UD mode |
+| `inline_data` | ch07-engineering/02-tuning/ | Inline optimization |
+| `unsignaled_send` | ch07-engineering/02-tuning/ | Unsignaled send |
+| `srq_demo` | ch07-engineering/02-tuning/ | Shared Receive Queue |
+| `trigger_errors` | ch07-engineering/04-error-handling/ | Error triggering |
+| `error_diagnosis` | ch07-engineering/04-error-handling/ | Error diagnosis |
+| `error_cheatsheet` | ch09-quickref/ | Error quick reference |
 
-运行方式：
+How to run:
 ```bash
 ulimit -l unlimited
 ./ch09-quickref/hello_rdma
 ```
 
-### 双进程程序（需要两个终端，server + client）
+### Dual-Process Programs (Two terminals needed, server + client)
 
-| 程序 | 路径 | 终端1 (Server) | 终端2 (Client) |
-|------|------|---------------|----------------|
+| Program | Path | Terminal 1 (Server) | Terminal 2 (Client) |
+|---------|------|---------------------|---------------------|
 | `rdma_write` | ch05/.../01-rdma-write/ | `./rdma_write server` | `./rdma_write client 127.0.0.1` |
 | `01_write_imm` | ch05/.../01-rdma-write/ | `./01_write_imm server` | `./01_write_imm client 127.0.0.1` |
 | `send_recv` | ch05/.../02-send-recv/ | `./send_recv server` | `./send_recv client 127.0.0.1` |
@@ -310,145 +310,145 @@ ulimit -l unlimited
 | `manual_connect` | ch06/.../01-manual-connect/ | `./manual_connect -s` | `./manual_connect -c 127.0.0.1` |
 | `rdma_cm_example` | ch06/.../02-rdma-cm/ | `./rdma_cm_example -s 7471` | `./rdma_cm_example -c 127.0.0.1 7471` |
 
-运行方式：
+How to run:
 ```bash
-# 两个终端都需要
+# Both terminals need this
 ulimit -l unlimited
 
-# 终端 1: 启动 server
+# Terminal 1: Start server
 ./rdma_write server
 
-# 终端 2: 启动 client (连接到 127.0.0.1)
+# Terminal 2: Start client (connect to 127.0.0.1)
 ./rdma_write client 127.0.0.1
 ```
 
-### 自动化测试
+### Automated Testing
 
 ```bash
-# 运行所有测试（自动处理 server/client）
+# Run all tests (automatically handles server/client)
 ./scripts/run_all_tests.sh
 ```
 
 ---
 
-## 6. 常见问题排查
+## 6. Common Troubleshooting
 
-### Q1: `ibv_devices` 没有输出
+### Q1: `ibv_devices` shows no output
 
-**原因**: SoftRoCE 未配置
+**Cause**: SoftRoCE not configured
 ```bash
-# 检查模块
+# Check module
 lsmod | grep rdma_rxe
-# 如果没有输出:
+# If no output:
 sudo modprobe rdma_rxe
 
-# 检查设备
+# Check device
 rdma link show
-# 如果没有 rxe 设备:
+# If no rxe device:
 sudo rdma link add rxe0 type rxe netdev eth0
 ```
 
-### Q2: `Cannot allocate memory` 或 `ibv_reg_mr failed`
+### Q2: `Cannot allocate memory` or `ibv_reg_mr failed`
 
-**原因**: 内存锁定限制不足
+**Cause**: Insufficient memory locking limit
 ```bash
 ulimit -l
-# 如果不是 unlimited:
+# If not unlimited:
 ulimit -l unlimited
 
-# 永久修复:
+# Permanent fix:
 sudo bash -c 'echo "* soft memlock unlimited" >> /etc/security/limits.conf'
 sudo bash -c 'echo "* hard memlock unlimited" >> /etc/security/limits.conf'
-# 重新登录
+# Re-login
 ```
 
-### Q3: QP 状态转换失败 `INIT->RTR failed`
+### Q3: QP state transition failed `INIT->RTR failed`
 
-**原因**: GID 配置问题
+**Cause**: GID configuration issue
 ```bash
-# 检查 GID 表是否有有效条目
+# Check if GID table has valid entries
 cat /sys/class/infiniband/rxe0/ports/1/gids/0
-# 如果全零，说明网卡没有 IP 地址
+# If all zeros, the NIC has no IP address
 
-# 解决: 确保网卡有 IP
+# Solution: Ensure NIC has an IP
 ip addr show
-# 如果没有 IP，配置一个
+# If no IP, configure one
 sudo ip addr add 192.168.1.100/24 dev eth0
 ```
 
-### Q4: `ibv_devinfo` 显示 `state: PORT_DOWN`
+### Q4: `ibv_devinfo` shows `state: PORT_DOWN`
 
-**原因**: 底层网卡未 UP
+**Cause**: Underlying NIC is not UP
 ```bash
-# 检查网卡状态
+# Check NIC status
 ip link show eth0
-# 如果是 DOWN:
+# If DOWN:
 sudo ip link set eth0 up
 ```
 
-### Q5: 双进程测试中 client 连不上 server
+### Q5: Client cannot connect to server in dual-process test
 
-**原因**: TCP 端口冲突或 server 未启动
+**Cause**: TCP port conflict or server not started
 ```bash
-# 检查端口是否被占用
+# Check if port is in use
 ss -tlnp | grep 9876
 
-# 确保先启动 server，等 1-2 秒再启动 client
-# 某些程序使用不同的 TCP 端口:
+# Make sure to start server first, wait 1-2 seconds before starting client
+# Some programs use different TCP ports:
 #   rdma_write: 9876
 #   send_recv:  9999
 #   rdma_read:  8888
 #   atomic_ops: 7777
 ```
 
-### Q6: SoftRoCE 性能很低
+### Q6: SoftRoCE performance is very low
 
-**这是正常的!** SoftRoCE 走的是内核软件协议栈，不是真正的硬件旁路。
+**This is normal!** SoftRoCE uses the kernel software protocol stack, not true hardware bypass.
 
-| 指标 | SoftRoCE | 真实硬件 |
-|------|----------|---------|
-| 延迟 | ~50-100 μs | ~1-2 μs |
-| 带宽 | ~1-10 Gbps | ~100-400 Gbps |
-| CPU 占用 | 高 | 极低 |
+| Metric | SoftRoCE | Real Hardware |
+|--------|----------|--------------|
+| Latency | ~50-100 us | ~1-2 us |
+| Bandwidth | ~1-10 Gbps | ~100-400 Gbps |
+| CPU usage | High | Very low |
 
-SoftRoCE 的价值在于 **学习 API**，而非测试性能。
+The value of SoftRoCE lies in **learning the API**, not testing performance.
 
-### Q7: `rdma_cm_example` 连接失败
+### Q7: `rdma_cm_example` connection failed
 
-**原因**: rdma_cm 需要网络可达
+**Cause**: rdma_cm requires network reachability
 ```bash
-# 确保 127.0.0.1 可用（loopback 接口 UP）
+# Ensure 127.0.0.1 is available (loopback interface UP)
 ping -c 1 127.0.0.1
 
-# 确保 rdma_cm 模块已加载
+# Ensure rdma_cm module is loaded
 sudo modprobe rdma_cm
 ```
 
-### Q8: `modprobe rdma_rxe` 失败
+### Q8: `modprobe rdma_rxe` failed
 
-**原因**: 内核不支持或模块未编译
+**Cause**: Kernel does not support it or module not compiled
 ```bash
-# 检查内核版本（需要 4.8+）
+# Check kernel version (requires 4.8+)
 uname -r
 
-# 检查模块是否存在
+# Check if module exists
 find /lib/modules/$(uname -r) -name "rdma_rxe*"
 
-# 如果模块不存在，可能需要安装:
+# If module does not exist, you may need to install:
 sudo apt install linux-modules-extra-$(uname -r)
 ```
 
-### Q9: Docker/容器中无法使用 SoftRoCE
+### Q9: Cannot use SoftRoCE in Docker/container
 
 ```bash
-# 容器需要额外权限:
+# Container requires additional privileges:
 docker run --privileged --cap-add=IPC_LOCK ...
 
-# 或者在宿主机上配置 SoftRoCE，容器共享:
+# Or configure SoftRoCE on the host and share with container:
 docker run --device=/dev/infiniband/uverbs0 ...
 ```
 
-### Q10: 编译报错 `rdma/rdma_cma.h: No such file`
+### Q10: Build error `rdma/rdma_cma.h: No such file`
 
 ```bash
 sudo apt install librdmacm-dev
@@ -456,34 +456,34 @@ sudo apt install librdmacm-dev
 
 ---
 
-## 7. 一键测试
+## 7. One-Click Testing
 
-配置完环境后，验证所有程序:
+After setting up the environment, verify all programs:
 
 ```bash
-# 编译
+# Build
 make all
 
-# 运行全量测试
+# Run full test suite
 ./scripts/run_all_tests.sh
 ```
 
-预期输出:
+Expected output:
 ```
 =================================================
-   测试汇总
+   Test Summary
 =================================================
 
-  总计:   ~30 个测试
-  通过:   ~30
-  失败:   0
-  跳过:   0
+  Total:   ~30 tests
+  Passed:  ~30
+  Failed:  0
+  Skipped: 0
 
-  所有测试通过! SoftRoCE 环境完全可用。
+  All tests passed! SoftRoCE environment is fully functional.
 ```
 
 ---
 
-## 下一步
+## Next Step
 
-环境就绪后，进入第一章：[RDMA 基础概念](../ch01-intro/README.md)
+Once the environment is ready, proceed to Chapter 1: [RDMA Basic Concepts](../ch01-intro/README.md)

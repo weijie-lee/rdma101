@@ -1,14 +1,14 @@
-# 手动 TCP 交换建连示例 Makefile
+# Manual TCP Exchange Connection Example Makefile
 #
-# 编译: make
-# 清理: make clean
+# Build: make
+# Clean: make clean
 #
-# 依赖: libibverbs-dev, 公共工具库 (../../common/librdma_utils.a)
+# Dependencies: libibverbs-dev, common utility library (../../common/librdma_utils.a)
 
 CC = gcc
 CFLAGS = -Wall -O2 -g
 
-# 公共工具库路径
+# Common utility library path
 COMMON_DIR = ../../common
 INCLUDES = -I$(COMMON_DIR)
 LIBS = $(COMMON_DIR)/librdma_utils.a -libverbs
@@ -20,15 +20,15 @@ SRC = manual_connect.c
 
 all: common $(TARGET)
 
-# 确保公共库已编译
+# Ensure common library is built
 common:
 	$(MAKE) -C $(COMMON_DIR)
 
 $(TARGET): $(SRC)
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $< $(LIBS)
-	@echo "编译完成: $(TARGET)"
-	@echo "  服务器: ./$(TARGET) -s [tcp_port]"
-	@echo "  客户端: ./$(TARGET) -c <server_ip> [tcp_port]"
+	@echo "Build complete: $(TARGET)"
+	@echo "  Server: ./$(TARGET) -s [tcp_port]"
+	@echo "  Client: ./$(TARGET) -c <server_ip> [tcp_port]"
 
 clean:
 	rm -f $(TARGET)

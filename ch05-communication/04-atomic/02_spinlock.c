@@ -1,36 +1,37 @@
 /**
- * 分布式自旋锁 (Distributed Spinlock) —— 基于 RDMA CAS (Compare-and-Swap) 实现
+ * Distributed Spinlock - Based on RDMA CAS (Compare-and-Swap)
  *
- * 原理:
- *   在分布式系统中，多个节点需要互斥访问共享资源。传统方案依赖中心化的锁服务器，
- *   每次加锁/解锁都需要网络往返 (RTT) 和服务器 CPU 参与。
+ * Principle:
+ *   In distributed systems, multiple nodes need mutual exclusion to access shared resources.
+ *   Traditional approaches rely on a centralized lock server, requiring network round-trips (RTT)
+ *   and server CPU involvement for each lock/unlock operation.
  *
- *   基于 RDMA 原子操作的分布式锁可以完全绕过服务器 CPU:
- *     - 服务器只需维护锁变量和共享数据的内存，不参与任何锁逻辑
- *     - 客户端通过 RDMA CAS 直接操作服务器内存中的锁变量
- *     - 全程零拷贝、零 CPU 干预 (one-sided RDMA)
+ *   A distributed lock based on RDMA atomic operations can completely bypass the server CPU:
+ *     - Server only needs to maintain lock variable and shared data memory, without participating in any lock logic
+ *     - Client directly operates on the lock variable in server memory via RDMA CAS
+ *     - Fully zero-copy, zero CPU intervention (one-sided RDMA)
  *
- *   锁变量语义:
- *     uint64_t lock: 0 = 未锁定 (unlocked), 1 = 已锁定 (locked)
+ *   Lock variable semantics:
+ *     uint64_t lock: 0 = unlocked, 1 = locked
  *
- *   加锁 (Acquire): CAS(lock, expected=0, new=1)
- *     - 若远端 lock == 0 → 原子地设为 1，返回旧值 0 → 加锁成功
- *     - 若远端 lock != 0 → 不做修改，返回旧值 1 → 锁被占用，自旋重试
+ *   Acquire Lock: CAS(lock, expected=0, new=1)
+ *     - If remote lock == 0 -> atomically set to 1, returns old value 0 -> lock acquired
+ *     - If remote lock != 0 -> no modification, returns old value 1 -> lock held, spin retry
  *
- *   解锁 (Release): CAS(lock, expected=1, new=0)
- *     - 若远端 lock == 1 → 原子地设为 0，返回旧值 1 → 解锁成功
- *     - 若远端 lock != 1 → 异常状态 (锁未被持有就尝试释放)
+ *   Release Lock: CAS(lock, expected=1, new=0)
+ *     - If remote lock == 1 -> atomically set to 0, returns old value 1 -> unlock succeeded
+ *     - If remote lock != 1 -> abnormal state (attempting to release an unheld lock)
  *
- * 应用场景:
- *   - 分布式 KV 存储 (如 FaRM, DrTM)
- *   - 分布式文件系统的元数据互斥
- *   - RDMA-based 共享内存并发控制
+ * Use cases:
+ *   - Distributed KV stores (e.g., FaRM, DrTM)
+ *   - Distributed filesystem metadata mutual exclusion
+ *   - RDMA-based shared memory concurrency control
  *
- * 用法:
- *   服务器: ./02_spinlock server
- *   客户端: ./02_spinlock client <server_ip>
+ * Usage:
+ *   Server: ./02_spinlock server
+ *   Client: ./02_spinlock client <server_ip>
  *
- * 编译: gcc -o 02_spinlock 02_spinlock.c -I../../common ../../common/librdma_utils.a -libverbs
+ * Build: gcc -o 02_spinlock 02_spinlock.c -I../../common ../../common/librdma_utils.a -libverbs
  */
 
 #include <stdio.h>
@@ -43,34 +44,35 @@
 #include "rdma_utils.h"
 
 #define TCP_PORT        7780
-#define DATA_BUF_SIZE   256         /* 共享数据区大小 */
-#define MAX_SPIN_COUNT  1000000     /* 自旋上限，防止死锁/无限等待 */
+#define DATA_BUF_SIZE   256         /* Shared data region size */
+#define MAX_SPIN_COUNT  1000000     /* Spin limit to prevent deadlock/infinite wait */
 
-/* ========== 扩展连接信息 ========== */
+/* ========== Extended Connection Info ========== */
 
 /**
- * 除了标准 rdma_endpoint (QP号, LID, GID 等) 之外，
- * 分布式锁还需要交换锁变量和数据区的远端地址/rkey，
- * 因为 rdma_endpoint 只提供一组 buf_addr/buf_rkey。
+ * In addition to the standard rdma_endpoint (QP number, LID, GID, etc.),
+ * the distributed lock also needs to exchange the remote addresses/rkeys
+ * of the lock variable and data region, since rdma_endpoint only provides
+ * one set of buf_addr/buf_rkey.
  */
 struct spinlock_conn_info {
-    struct rdma_endpoint ep;        /* 标准端点信息 */
-    uint64_t    lock_addr;          /* 锁变量远端虚拟地址 */
-    uint32_t    lock_rkey;          /* 锁变量 MR 的 rkey */
-    uint64_t    data_addr;          /* 共享数据区远端虚拟地址 */
-    uint32_t    data_rkey;          /* 共享数据区 MR 的 rkey */
+    struct rdma_endpoint ep;        /* Standard endpoint info */
+    uint64_t    lock_addr;          /* Lock variable remote virtual address */
+    uint32_t    lock_rkey;          /* Lock variable MR rkey */
+    uint64_t    data_addr;          /* Shared data region remote virtual address */
+    uint32_t    data_rkey;          /* Shared data region MR rkey */
 };
 
-/* ========== TCP 交换扩展连接信息 ========== */
+/* ========== TCP Exchange Extended Connection Info ========== */
 
 /**
- * exchange_spinlock_conn_tcp - 通过 TCP 交换分布式锁的连接信息
+ * exchange_spinlock_conn_tcp - Exchange distributed lock connection info via TCP
  *
- * @server_ip: NULL=作为服务器监听; 非NULL=作为客户端连接
- * @local:     本地信息 (输入)
- * @remote:    对端信息 (输出)
+ * @server_ip: NULL=act as server listening; non-NULL=act as client connecting
+ * @local:     Local info (input)
+ * @remote:    Peer info (output)
  *
- * 返回: 0 成功, -1 失败
+ * Returns: 0 success, -1 failure
  */
 static int exchange_spinlock_conn_tcp(const char *server_ip,
                                       const struct spinlock_conn_info *local,
@@ -88,7 +90,7 @@ static int exchange_spinlock_conn_tcp(const char *server_ip,
     if (sock < 0) { perror("[TCP] socket"); return -1; }
 
     if (server_ip == NULL) {
-        /* 服务端: 监听等待客户端连接 */
+        /* Server: listen and wait for client connection */
         setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
         addr.sin_addr.s_addr = INADDR_ANY;
         if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
@@ -97,11 +99,11 @@ static int exchange_spinlock_conn_tcp(const char *server_ip,
         if (listen(sock, 1) < 0) {
             perror("[TCP] listen"); goto out;
         }
-        printf("[TCP] 等待客户端连接 (端口 %d)...\n", TCP_PORT);
+        printf("[TCP] Waiting for client connection (port %d)...\n", TCP_PORT);
         conn = accept(sock, NULL, NULL);
         if (conn < 0) { perror("[TCP] accept"); goto out; }
 
-        /* 服务端: 先收后发 */
+        /* Server: receive first, then send */
         if (recv(conn, remote, sizeof(*remote), MSG_WAITALL) != (ssize_t)sizeof(*remote)) {
             perror("[TCP] recv"); goto out;
         }
@@ -109,16 +111,16 @@ static int exchange_spinlock_conn_tcp(const char *server_ip,
             perror("[TCP] send"); goto out;
         }
     } else {
-        /* 客户端: 连接到服务端 */
+        /* Client: connect to server */
         inet_pton(AF_INET, server_ip, &addr.sin_addr);
-        printf("[TCP] 连接服务器 %s:%d ...\n", server_ip, TCP_PORT);
+        printf("[TCP] Connecting to server %s:%d ...\n", server_ip, TCP_PORT);
         if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
             perror("[TCP] connect"); goto out;
         }
         conn = sock;
         sock = -1;
 
-        /* 客户端: 先发后收 */
+        /* Client: send first, then receive */
         if (send(conn, local, sizeof(*local), 0) != (ssize_t)sizeof(*local)) {
             perror("[TCP] send"); goto out;
         }
@@ -134,24 +136,24 @@ out:
     return ret;
 }
 
-/* ========== CAS 原子操作封装 ========== */
+/* ========== CAS Atomic Operation Wrapper ========== */
 
 /**
- * post_cas_and_poll - 执行一次 CAS 原子操作并等待完成
+ * post_cas_and_poll - Execute one CAS atomic operation and wait for completion
  *
- * CAS 语义: 原子地比较 remote_addr 处的值与 expected，
- *   若相等则替换为 new_val，并将操作前的旧值写入 result_buf。
+ * CAS semantics: atomically compare the value at remote_addr with expected,
+ *   if equal then replace with new_val, and write the pre-operation old value into result_buf.
  *
- * @qp:          队列对
- * @cq:          完成队列
- * @result_addr: 本地结果缓冲区地址 (旧值写回此处)
- * @result_lkey: 结果缓冲区 MR 的 lkey
- * @remote_addr: 远端锁变量地址
- * @remote_rkey: 远端锁变量 MR 的 rkey
- * @expected:    期望的旧值
- * @new_val:     要写入的新值
+ * @qp:          Queue pair
+ * @cq:          Completion queue
+ * @result_addr: Local result buffer address (old value written back here)
+ * @result_lkey: Result buffer MR lkey
+ * @remote_addr: Remote lock variable address
+ * @remote_rkey: Remote lock variable MR rkey
+ * @expected:    Expected old value
+ * @new_val:     New value to write
  *
- * 返回: 0 成功, -1 失败
+ * Returns: 0 success, -1 failure
  */
 static int post_cas_and_poll(struct ibv_qp *qp, struct ibv_cq *cq,
                              uint64_t result_addr, uint32_t result_lkey,
@@ -173,31 +175,31 @@ static int post_cas_and_poll(struct ibv_qp *qp, struct ibv_cq *cq,
     wr.send_flags = IBV_SEND_SIGNALED;
     wr.wr.atomic.remote_addr = remote_addr;
     wr.wr.atomic.rkey        = remote_rkey;
-    wr.wr.atomic.compare_add = expected;   /* 比较值 */
-    wr.wr.atomic.swap        = new_val;    /* 交换值 */
+    wr.wr.atomic.compare_add = expected;   /* Compare value */
+    wr.wr.atomic.swap        = new_val;    /* Swap value */
 
     struct ibv_send_wr *bad_wr = NULL;
     if (ibv_post_send(qp, &wr, &bad_wr) != 0) {
-        perror("[CAS] ibv_post_send 失败");
+        perror("[CAS] ibv_post_send failed");
         return -1;
     }
 
-    /* 阻塞等待完成 */
+    /* Blocking wait for completion */
     struct ibv_wc wc;
     if (poll_cq_blocking(cq, &wc) != 0 || wc.status != IBV_WC_SUCCESS) {
-        fprintf(stderr, "[CAS] WC 失败: %s\n",
+        fprintf(stderr, "[CAS] WC failed: %s\n",
                 wc.status != IBV_WC_SUCCESS ? ibv_wc_status_str(wc.status) : "poll error");
         return -1;
     }
     return 0;
 }
 
-/* ========== RDMA Write 封装 ========== */
+/* ========== RDMA Write Wrapper ========== */
 
 /**
- * post_write_and_poll - 执行一次 RDMA Write 并等待完成
+ * post_write_and_poll - Execute one RDMA Write and wait for completion
  *
- * 将本地数据单向写入远端内存，不通知远端 CPU (one-sided)。
+ * Writes local data unilaterally to remote memory without notifying remote CPU (one-sided).
  */
 static int post_write_and_poll(struct ibv_qp *qp, struct ibv_cq *cq,
                                uint64_t local_addr, uint32_t local_lkey,
@@ -222,80 +224,80 @@ static int post_write_and_poll(struct ibv_qp *qp, struct ibv_cq *cq,
 
     struct ibv_send_wr *bad_wr = NULL;
     if (ibv_post_send(qp, &wr, &bad_wr) != 0) {
-        perror("[WRITE] ibv_post_send 失败");
+        perror("[WRITE] ibv_post_send failed");
         return -1;
     }
 
     struct ibv_wc wc;
     if (poll_cq_blocking(cq, &wc) != 0 || wc.status != IBV_WC_SUCCESS) {
-        fprintf(stderr, "[WRITE] WC 失败: %s\n",
+        fprintf(stderr, "[WRITE] WC failed: %s\n",
                 wc.status != IBV_WC_SUCCESS ? ibv_wc_status_str(wc.status) : "poll error");
         return -1;
     }
     return 0;
 }
 
-/* ========== 主程序 ========== */
+/* ========== Main Program ========== */
 
 int main(int argc, char *argv[])
 {
-    /* --- 参数解析 --- */
+    /* --- Argument parsing --- */
     if (argc < 2) {
-        fprintf(stderr, "用法: %s server|client [server_ip]\n", argv[0]);
+        fprintf(stderr, "Usage: %s server|client [server_ip]\n", argv[0]);
         return 1;
     }
     int is_server = (strcmp(argv[1], "server") == 0);
     const char *server_ip = is_server ? NULL : (argc > 2 ? argv[2] : "127.0.0.1");
 
-    printf("=== RDMA 分布式自旋锁 (CAS) ===\n");
-    printf("角色: %s\n\n", is_server ? "服务端 (锁/数据持有者)" : "客户端 (锁请求者)");
+    printf("=== RDMA Distributed Spinlock (CAS) ===\n");
+    printf("Role: %s\n\n", is_server ? "Server (lock/data holder)" : "Client (lock requester)");
 
-    /* --- RDMA 资源声明 --- */
+    /* --- RDMA resource declarations --- */
     struct ibv_device     **dev_list  = NULL;
     struct ibv_context     *ctx       = NULL;
     struct ibv_pd          *pd        = NULL;
     struct ibv_cq          *cq        = NULL;
     struct ibv_qp          *qp        = NULL;
 
-    /* 服务端: 锁变量和共享数据 (独立 posix_memalign，各自注册 MR) */
-    uint64_t  *lock_var     = NULL;     /* 锁: 0=未锁定, 1=已锁定 */
-    uint64_t  *shared_data  = NULL;     /* 共享数据区 */
+    /* Server: lock variable and shared data (independent posix_memalign, each with its own MR) */
+    uint64_t  *lock_var     = NULL;     /* Lock: 0=unlocked, 1=locked */
+    uint64_t  *shared_data  = NULL;     /* Shared data region */
     struct ibv_mr *lock_mr  = NULL;
     struct ibv_mr *data_mr  = NULL;
 
-    /* 客户端: CAS 结果缓冲区 + RDMA Write 源数据缓冲区 */
-    uint64_t  *result_buf   = NULL;     /* CAS 返回旧值写入此处 */
-    char      *write_buf    = NULL;     /* RDMA Write 源数据 */
+    /* Client: CAS result buffer + RDMA Write source data buffer */
+    uint64_t  *result_buf   = NULL;     /* CAS returns old value written here */
+    char      *write_buf    = NULL;     /* RDMA Write source data */
     struct ibv_mr *result_mr = NULL;
     struct ibv_mr *write_mr  = NULL;
 
     int ret = 1;
     int num_devices;
 
-    /* ========== 步骤1: 打开 RDMA 设备 ========== */
+    /* ========== Step 1: Open RDMA device ========== */
     dev_list = ibv_get_device_list(&num_devices);
-    CHECK_NULL(dev_list, "获取设备列表失败");
+    CHECK_NULL(dev_list, "Failed to get device list");
     if (num_devices == 0) {
-        fprintf(stderr, "[错误] 没有找到 RDMA 设备\n");
+        fprintf(stderr, "[Error] No RDMA devices found\n");
         goto cleanup;
     }
-    printf("[步骤1] 设备: %s (共 %d 个)\n",
+    printf("[Step 1] Device: %s (total %d)\n",
            ibv_get_device_name(dev_list[0]), num_devices);
 
     ctx = ibv_open_device(dev_list[0]);
-    CHECK_NULL(ctx, "打开设备失败");
+    CHECK_NULL(ctx, "Failed to open device");
 
-    /* 自动检测 IB/RoCE 传输层类型 */
+    /* Auto-detect IB/RoCE transport layer type */
     enum rdma_transport transport = detect_transport(ctx, RDMA_DEFAULT_PORT_NUM);
     int is_roce = (transport == RDMA_TRANSPORT_ROCE);
-    printf("  传输层: %s\n\n", transport_str(transport));
+    printf("  Transport layer: %s\n\n", transport_str(transport));
 
-    /* ========== 步骤2: 创建 PD / CQ / QP ========== */
+    /* ========== Step 2: Create PD / CQ / QP ========== */
     pd = ibv_alloc_pd(ctx);
-    CHECK_NULL(pd, "分配 PD 失败");
+    CHECK_NULL(pd, "Failed to allocate PD");
 
     cq = ibv_create_cq(ctx, 128, NULL, NULL, 0);
-    CHECK_NULL(cq, "创建 CQ 失败");
+    CHECK_NULL(cq, "Failed to create CQ");
 
     struct ibv_qp_init_attr qp_init_attr;
     memset(&qp_init_attr, 0, sizeof(qp_init_attr));
@@ -308,35 +310,35 @@ int main(int argc, char *argv[])
     qp_init_attr.cap.max_recv_sge = 1;
 
     qp = ibv_create_qp(pd, &qp_init_attr);
-    CHECK_NULL(qp, "创建 QP 失败");
-    printf("[步骤2] PD/CQ/QP 创建完成 (QP号=%u)\n", qp->qp_num);
+    CHECK_NULL(qp, "Failed to create QP");
+    printf("[Step 2] PD/CQ/QP created (QP num=%u)\n", qp->qp_num);
 
-    /* ========== 步骤3: 分配内存 + 注册 MR ========== */
+    /* ========== Step 3: Allocate memory + Register MR ========== */
     /*
-     * 锁变量和共享数据分别 posix_memalign 到 64 字节边界:
-     *   - 原子操作要求目标地址至少 8 字节对齐
-     *   - 64 字节对齐可避免 false sharing (cache line = 64B)
+     * Lock variable and shared data each use posix_memalign to 64-byte boundary:
+     *   - Atomic operations require target address to be at least 8-byte aligned
+     *   - 64-byte alignment avoids false sharing (cache line = 64B)
      *
-     * 注册 MR 时需要开启:
-     *   REMOTE_WRITE  - 允许客户端 RDMA Write 写入数据
-     *   REMOTE_READ   - 允许客户端 RDMA Read 读取数据 (可选)
-     *   REMOTE_ATOMIC - 允许客户端 CAS/FAA 原子操作修改锁
-     *   LOCAL_WRITE   - 允许 RDMA 硬件写入本地内存 (接收侧必需)
+     * MR registration must enable:
+     *   REMOTE_WRITE  - Allow client RDMA Write to write data
+     *   REMOTE_READ   - Allow client RDMA Read to read data (optional)
+     *   REMOTE_ATOMIC - Allow client CAS/FAA atomic operations to modify lock
+     *   LOCAL_WRITE   - Allow RDMA hardware to write to local memory (required on receive side)
      */
     int access_flags = IBV_ACCESS_LOCAL_WRITE  | IBV_ACCESS_REMOTE_WRITE |
                        IBV_ACCESS_REMOTE_READ  | IBV_ACCESS_REMOTE_ATOMIC;
 
-    /* 锁变量: uint64_t, 64 字节对齐 */
+    /* Lock variable: uint64_t, 64-byte aligned */
     if (posix_memalign((void **)&lock_var, 64, sizeof(uint64_t)) != 0) {
         perror("posix_memalign(lock_var)");
         goto cleanup;
     }
-    *lock_var = 0;  /* 初始: 未锁定 */
+    *lock_var = 0;  /* Initial: unlocked */
 
     lock_mr = ibv_reg_mr(pd, lock_var, sizeof(uint64_t), access_flags);
-    CHECK_NULL(lock_mr, "注册 lock MR 失败");
+    CHECK_NULL(lock_mr, "Failed to register lock MR");
 
-    /* 共享数据区: posix_memalign 到 64 字节 */
+    /* Shared data region: posix_memalign to 64 bytes */
     if (posix_memalign((void **)&shared_data, 64, DATA_BUF_SIZE) != 0) {
         perror("posix_memalign(shared_data)");
         goto cleanup;
@@ -344,9 +346,9 @@ int main(int argc, char *argv[])
     memset(shared_data, 0, DATA_BUF_SIZE);
 
     data_mr = ibv_reg_mr(pd, shared_data, DATA_BUF_SIZE, access_flags);
-    CHECK_NULL(data_mr, "注册 data MR 失败");
+    CHECK_NULL(data_mr, "Failed to register data MR");
 
-    /* CAS 结果缓冲区 (客户端用，服务端也分配以简化代码) */
+    /* CAS result buffer (used by client, also allocated on server for code simplicity) */
     if (posix_memalign((void **)&result_buf, 64, sizeof(uint64_t)) != 0) {
         perror("posix_memalign(result_buf)");
         goto cleanup;
@@ -354,9 +356,9 @@ int main(int argc, char *argv[])
     *result_buf = 0;
 
     result_mr = ibv_reg_mr(pd, result_buf, sizeof(uint64_t), IBV_ACCESS_LOCAL_WRITE);
-    CHECK_NULL(result_mr, "注册 result MR 失败");
+    CHECK_NULL(result_mr, "Failed to register result MR");
 
-    /* RDMA Write 源数据缓冲区 (客户端用) */
+    /* RDMA Write source data buffer (used by client) */
     if (posix_memalign((void **)&write_buf, 64, DATA_BUF_SIZE) != 0) {
         perror("posix_memalign(write_buf)");
         goto cleanup;
@@ -364,10 +366,10 @@ int main(int argc, char *argv[])
     memset(write_buf, 0, DATA_BUF_SIZE);
 
     write_mr = ibv_reg_mr(pd, write_buf, DATA_BUF_SIZE, IBV_ACCESS_LOCAL_WRITE);
-    CHECK_NULL(write_mr, "注册 write MR 失败");
+    CHECK_NULL(write_mr, "Failed to register write MR");
 
-    printf("[步骤3] 内存分配 + MR 注册完成\n");
-    printf("  lock_var:    addr=%p, rkey=0x%x (初始值=%lu)\n",
+    printf("[Step 3] Memory allocation + MR registration complete\n");
+    printf("  lock_var:    addr=%p, rkey=0x%x (initial value=%lu)\n",
            (void *)lock_var, lock_mr->rkey, (unsigned long)*lock_var);
     printf("  shared_data: addr=%p, rkey=0x%x\n",
            (void *)shared_data, data_mr->rkey);
@@ -376,201 +378,201 @@ int main(int argc, char *argv[])
     printf("  write_buf:   addr=%p, lkey=0x%x\n\n",
            (void *)write_buf, write_mr->lkey);
 
-    /* ========== 步骤4: 交换连接信息 (TCP 带外) ========== */
+    /* ========== Step 4: Exchange connection info (TCP out-of-band) ========== */
     struct spinlock_conn_info local_info, remote_info;
     memset(&local_info, 0, sizeof(local_info));
     memset(&remote_info, 0, sizeof(remote_info));
 
-    /* 填充标准端点信息 (QP号, LID, GID 等) */
+    /* Fill standard endpoint info (QP number, LID, GID, etc.) */
     int fill_ret = fill_local_endpoint(ctx, qp, RDMA_DEFAULT_PORT_NUM,
                                        RDMA_DEFAULT_GID_INDEX, &local_info.ep);
-    CHECK_ERRNO(fill_ret, "填充端点信息失败");
+    CHECK_ERRNO(fill_ret, "Failed to fill endpoint info");
 
-    /* 填充锁和数据的远端地址/rkey */
+    /* Fill lock and data remote addresses/rkeys */
     local_info.lock_addr = (uint64_t)(uintptr_t)lock_var;
     local_info.lock_rkey = lock_mr->rkey;
     local_info.data_addr = (uint64_t)(uintptr_t)shared_data;
     local_info.data_rkey = data_mr->rkey;
 
-    printf("[步骤4] TCP 信息交换 (端口 %d)...\n", TCP_PORT);
+    printf("[Step 4] TCP info exchange (port %d)...\n", TCP_PORT);
     if (exchange_spinlock_conn_tcp(server_ip, &local_info, &remote_info) != 0) {
-        fprintf(stderr, "[错误] TCP 信息交换失败\n");
+        fprintf(stderr, "[Error] TCP info exchange failed\n");
         goto cleanup;
     }
 
-    printf("  本地: QP=%u, lock=0x%lx, data=0x%lx\n",
+    printf("  Local: QP=%u, lock=0x%lx, data=0x%lx\n",
            local_info.ep.qp_num,
            (unsigned long)local_info.lock_addr,
            (unsigned long)local_info.data_addr);
-    printf("  远端: QP=%u, lock=0x%lx (rkey=0x%x), data=0x%lx (rkey=0x%x)\n",
+    printf("  Remote: QP=%u, lock=0x%lx (rkey=0x%x), data=0x%lx (rkey=0x%x)\n",
            remote_info.ep.qp_num,
            (unsigned long)remote_info.lock_addr, remote_info.lock_rkey,
            (unsigned long)remote_info.data_addr, remote_info.data_rkey);
 
-    /* QP 状态转换: RESET → INIT → RTR → RTS */
+    /* QP state transition: RESET -> INIT -> RTR -> RTS */
     int conn_ret = qp_full_connect(qp, &remote_info.ep,
                                    RDMA_DEFAULT_PORT_NUM, is_roce,
                                    access_flags);
-    CHECK_ERRNO(conn_ret, "QP 建连失败");
-    printf("  QP 连接就绪 (RESET→INIT→RTR→RTS)\n\n");
+    CHECK_ERRNO(conn_ret, "QP connection failed");
+    printf("  QP connection ready (RESET->INIT->RTR->RTS)\n\n");
 
-    /* ========== 步骤5: 分布式锁操作 ========== */
+    /* ========== Step 5: Distributed lock operations ========== */
 
     if (is_server) {
-        /* ======= 服务端: 被动等待，只维护内存 ======= */
+        /* ======= Server: passive wait, only maintains memory ======= */
         /*
-         * 分布式锁的核心特性: 服务端 CPU 不参与锁操作。
-         * 客户端通过 RDMA CAS 直接修改服务端内存中的 lock_var，
-         * 通过 RDMA Write 直接写入服务端内存中的 shared_data。
-         * 服务端只需保持内存可访问即可 (真正的 one-sided RDMA)。
+         * Core feature of distributed lock: server CPU does not participate in lock operations.
+         * Client directly modifies the lock_var in server memory via RDMA CAS,
+         * and directly writes to shared_data in server memory via RDMA Write.
+         * Server only needs to keep memory accessible (truly one-sided RDMA).
          */
-        printf("=== 服务端: 等待客户端操作 ===\n");
-        printf("  lock_var 地址: %p, rkey=0x%x\n", (void *)lock_var, lock_mr->rkey);
-        printf("  shared_data 地址: %p, rkey=0x%x\n", (void *)shared_data, data_mr->rkey);
-        printf("  当前 lock = %lu (0=未锁定)\n\n",
+        printf("=== Server: Waiting for client operations ===\n");
+        printf("  lock_var address: %p, rkey=0x%x\n", (void *)lock_var, lock_mr->rkey);
+        printf("  shared_data address: %p, rkey=0x%x\n", (void *)shared_data, data_mr->rkey);
+        printf("  Current lock = %lu (0=unlocked)\n\n",
                (unsigned long)*lock_var);
 
-        /* 定期打印锁和数据的状态，观察客户端的远程操作效果 */
-        printf("  等待客户端完成操作 (每秒打印状态)...\n");
+        /* Periodically print lock and data status to observe client's remote operations */
+        printf("  Waiting for client to complete operations (printing status every second)...\n");
         for (int i = 0; i < 12; i++) {
             sleep(1);
             printf("  [t=%2ds] lock=%lu (%s), shared_data=\"%s\"\n",
                    i + 1,
                    (unsigned long)*lock_var,
-                   *lock_var == 0 ? "未锁定" : "已锁定",
+                   *lock_var == 0 ? "unlocked" : "locked",
                    (char *)shared_data);
         }
 
-        /* 最终状态打印 */
-        printf("\n=== 服务端: 最终状态 ===\n");
+        /* Final status print */
+        printf("\n=== Server: Final state ===\n");
         printf("  lock_var    = %lu (%s)\n",
                (unsigned long)*lock_var,
-               *lock_var == 0 ? "未锁定 ✓ 客户端已正确释放锁" :
-                                "已锁定 ✗ 异常！锁未释放");
+               *lock_var == 0 ? "unlocked - client correctly released the lock" :
+                                "locked - abnormal! lock not released");
         printf("  shared_data = \"%s\"\n", (char *)shared_data);
 
     } else {
-        /* ======= 客户端: 加锁 → 写数据 → 解锁 ======= */
+        /* ======= Client: acquire lock -> write data -> release lock ======= */
         int spin_count;
-        printf("=== 客户端: 分布式锁操作流程 ===\n\n");
+        printf("=== Client: Distributed lock operation flow ===\n\n");
 
-        sleep(1);  /* 等待服务端就绪 */
+        sleep(1);  /* Wait for server to be ready */
 
-        /* --- 阶段1: 获取锁 (Acquire Lock) --- */
+        /* --- Phase 1: Acquire Lock --- */
         /*
-         * 自旋获取算法:
+         * Spin acquire algorithm:
          *   do {
          *       old_val = CAS(remote_lock, expected=0, new=1);
          *   } while (old_val != 0);
          *
-         * result_buf 存储 CAS 操作前的旧值:
-         *   旧值 == 0: 之前未锁 → 成功设为 1 → 加锁成功
-         *   旧值 == 1: 锁被占用 → 未修改 → 继续自旋
+         * result_buf stores the old value before CAS:
+         *   old value == 0: was unlocked -> successfully set to 1 -> lock acquired
+         *   old value == 1: lock held -> not modified -> continue spinning
          */
-        printf("[阶段1] 获取分布式锁 (CAS: 0→1 自旋)\n");
-        printf("  目标: remote lock_addr=0x%lx, lock_rkey=0x%x\n\n",
+        printf("[Phase 1] Acquiring distributed lock (CAS: 0->1 spin)\n");
+        printf("  Target: remote lock_addr=0x%lx, lock_rkey=0x%x\n\n",
                (unsigned long)remote_info.lock_addr, remote_info.lock_rkey);
 
         spin_count = 0;
         while (spin_count < MAX_SPIN_COUNT) {
             spin_count++;
 
-            /* CAS: 若远端 lock==0 则设为 1 */
+            /* CAS: if remote lock==0 then set to 1 */
             if (post_cas_and_poll(qp, cq,
                                   (uint64_t)(uintptr_t)result_buf, result_mr->lkey,
                                   remote_info.lock_addr, remote_info.lock_rkey,
-                                  0,    /* expected: 未锁定 */
-                                  1     /* new: 已锁定 */
+                                  0,    /* expected: unlocked */
+                                  1     /* new: locked */
                                  ) != 0) {
-                fprintf(stderr, "[错误] CAS 加锁操作失败\n");
+                fprintf(stderr, "[Error] CAS lock acquire operation failed\n");
                 goto cleanup;
             }
 
-            /* 检查返回的旧值 */
+            /* Check returned old value */
             if (*result_buf == 0) {
-                /* 旧值=0 → 加锁成功! */
-                printf("  ★ 锁已获取! (第 %d 次尝试, 返回旧值=%lu)\n\n",
+                /* old value=0 -> lock acquired! */
+                printf("  Lock acquired! (attempt #%d, returned old value=%lu)\n\n",
                        spin_count, (unsigned long)*result_buf);
                 break;
             }
 
-            /* 旧值≠0 → 锁被占用，继续自旋 */
+            /* old value!=0 -> lock held, continue spinning */
             if (spin_count <= 3 || spin_count % 1000 == 0) {
-                printf("  [自旋] 第 %d 次: 锁被占用 (旧值=%lu), 重试...\n",
+                printf("  [Spin] Attempt #%d: lock held (old value=%lu), retrying...\n",
                        spin_count, (unsigned long)*result_buf);
             }
         }
 
         if (spin_count >= MAX_SPIN_COUNT) {
-            fprintf(stderr, "[错误] 自旋 %d 次仍未获取锁，疑似死锁\n", MAX_SPIN_COUNT);
+            fprintf(stderr, "[Error] Spun %d times without acquiring lock, suspected deadlock\n", MAX_SPIN_COUNT);
             goto cleanup;
         }
 
-        /* --- 阶段2: 临界区 —— 通过 RDMA Write 写入共享数据 --- */
+        /* --- Phase 2: Critical section - write shared data via RDMA Write --- */
         /*
-         * 此时客户端持有锁 (远端 lock_var == 1)。
-         * 在锁的保护下，通过 RDMA Write 将数据写入服务端的 shared_data。
-         * 这模拟了在分布式临界区内修改共享资源。
+         * At this point the client holds the lock (remote lock_var == 1).
+         * Under lock protection, write data to server's shared_data via RDMA Write.
+         * This simulates modifying shared resources within a distributed critical section.
          *
-         * 注意: RDMA Write 是 one-sided 操作:
-         *   - 数据直接从客户端内存 DMA 到服务端内存
-         *   - 服务端 CPU 完全不感知这次写入
-         *   - 没有任何中断或上下文切换
+         * Note: RDMA Write is a one-sided operation:
+         *   - Data is DMA'd directly from client memory to server memory
+         *   - Server CPU is completely unaware of this write
+         *   - No interrupts or context switches
          */
-        printf("[阶段2] 临界区: RDMA Write 写入共享数据\n");
+        printf("[Phase 2] Critical section: RDMA Write to shared data\n");
         const char *msg = "DATA_FROM_CLIENT";
         strncpy(write_buf, msg, DATA_BUF_SIZE - 1);
-        printf("  写入内容: \"%s\" (%zu 字节)\n", msg, strlen(msg) + 1);
+        printf("  Writing: \"%s\" (%zu bytes)\n", msg, strlen(msg) + 1);
 
         if (post_write_and_poll(qp, cq,
                                 (uint64_t)(uintptr_t)write_buf, write_mr->lkey,
                                 (uint32_t)(strlen(msg) + 1),
                                 remote_info.data_addr, remote_info.data_rkey
                                ) != 0) {
-            fprintf(stderr, "[错误] RDMA Write 失败 (仍需释放锁)\n");
-            /* 即使写入失败也必须释放锁，否则死锁 */
+            fprintf(stderr, "[Error] RDMA Write failed (still need to release lock)\n");
+            /* Must release lock even if write fails, otherwise deadlock */
         } else {
-            printf("  RDMA Write 完成 ✓\n\n");
+            printf("  RDMA Write complete\n\n");
         }
 
-        /* --- 阶段3: 释放锁 (Release Lock) --- */
+        /* --- Phase 3: Release Lock --- */
         /*
          * CAS(lock, expected=1, new=0):
-         *   旧值 == 1: 之前已锁 → 成功设为 0 → 解锁成功
-         *   旧值 != 1: 异常 (不该发生 —— 我们持有锁时没人能修改它)
+         *   old value == 1: was locked -> successfully set to 0 -> unlock succeeded
+         *   old value != 1: abnormal (should not happen - no one can modify it while we hold the lock)
          */
-        printf("[阶段3] 释放分布式锁 (CAS: 1→0)\n");
+        printf("[Phase 3] Releasing distributed lock (CAS: 1->0)\n");
 
         if (post_cas_and_poll(qp, cq,
                               (uint64_t)(uintptr_t)result_buf, result_mr->lkey,
                               remote_info.lock_addr, remote_info.lock_rkey,
-                              1,    /* expected: 已锁定 */
-                              0     /* new: 未锁定 */
+                              1,    /* expected: locked */
+                              0     /* new: unlocked */
                              ) != 0) {
-            fprintf(stderr, "[错误] CAS 解锁操作失败\n");
+            fprintf(stderr, "[Error] CAS unlock operation failed\n");
             goto cleanup;
         }
 
         if (*result_buf == 1) {
-            printf("  ★ 锁已释放! (旧值=%lu → 新值=0)\n\n",
+            printf("  Lock released! (old value=%lu -> new value=0)\n\n",
                    (unsigned long)*result_buf);
         } else {
-            fprintf(stderr, "  [警告] 解锁异常: 返回旧值=%lu (期望=1)\n\n",
+            fprintf(stderr, "  [Warning] Unlock anomaly: returned old value=%lu (expected=1)\n\n",
                     (unsigned long)*result_buf);
         }
 
-        /* --- 操作总结 --- */
-        printf("=== 客户端: 操作完成 ===\n");
-        printf("  1. 获取锁 (CAS 0→1)           ✓\n");
-        printf("  2. 写入共享数据 (RDMA Write)   ✓\n");
-        printf("  3. 释放锁 (CAS 1→0)           ✓\n");
+        /* --- Operation summary --- */
+        printf("=== Client: Operation complete ===\n");
+        printf("  1. Acquire lock (CAS 0->1)           Done\n");
+        printf("  2. Write shared data (RDMA Write)     Done\n");
+        printf("  3. Release lock (CAS 1->0)            Done\n");
     }
 
     ret = 0;
 
 cleanup:
-    /* ========== 资源清理 (逆序释放) ========== */
-    printf("\n[清理] 释放 RDMA 资源...\n");
+    /* ========== Resource cleanup (reverse order) ========== */
+    printf("\n[Cleanup] Releasing RDMA resources...\n");
     if (write_mr)   ibv_dereg_mr(write_mr);
     if (result_mr)  ibv_dereg_mr(result_mr);
     if (data_mr)    ibv_dereg_mr(data_mr);
@@ -584,7 +586,7 @@ cleanup:
     if (result_buf) free(result_buf);
     if (shared_data) free(shared_data);
     if (lock_var)   free(lock_var);
-    printf("  清理完成\n");
+    printf("  Cleanup complete\n");
 
     return ret;
 }

@@ -1,16 +1,17 @@
 /**
- * 事件驱动型 CQ 完成通知演示 (Event-Driven Completion)
+ * Event-Driven CQ Completion Notification Demo
  *
- * 本程序演示基于 Completion Channel 的事件驱动 CQ 通知机制:
- *   1. 创建 ibv_comp_channel (完成通知通道)
- *   2. 创建 CQ 并关联到 channel
- *   3. 使用 ibv_req_notify_cq() 注册通知 (arm CQ)
- *   4. 使用 ibv_get_cq_event() 阻塞等待完成事件
- *   5. 使用 ibv_ack_cq_events() 确认事件
- *   6. 通过 loopback Send/Recv 触发真实完成事件
- *   7. 与忙轮询 (busy polling) 方式做对比说明
+ * This program demonstrates the event-driven CQ notification mechanism
+ * based on Completion Channel:
+ *   1. Create ibv_comp_channel (completion notification channel)
+ *   2. Create CQ and associate it with the channel
+ *   3. Use ibv_req_notify_cq() to register notification (arm CQ)
+ *   4. Use ibv_get_cq_event() to block-wait for completion events
+ *   5. Use ibv_ack_cq_events() to acknowledge events
+ *   6. Trigger real completion events via loopback Send/Recv
+ *   7. Compare with busy polling approach
  *
- * 编译: gcc -o cq_event_driven cq_event_driven.c -I../../common ../../common/librdma_utils.a -libverbs -lpthread
+ * Compile: gcc -o cq_event_driven cq_event_driven.c -I../../common ../../common/librdma_utils.a -libverbs -lpthread
  */
 
 #include <stdio.h>
@@ -29,106 +30,107 @@
 
 int main(int argc, char *argv[])
 {
-    /* 资源声明 */
+    /* Resource declarations */
     struct ibv_device      **dev_list = NULL;
     struct ibv_context      *ctx      = NULL;
     struct ibv_pd           *pd       = NULL;
-    struct ibv_comp_channel *channel  = NULL;  /* 完成通知通道 */
-    struct ibv_cq           *cq_event = NULL;  /* 事件驱动 CQ */
-    struct ibv_cq           *cq_poll  = NULL;  /* 忙轮询 CQ (对比用) */
+    struct ibv_comp_channel *channel  = NULL;  /* Completion notification channel */
+    struct ibv_cq           *cq_event = NULL;  /* Event-driven CQ */
+    struct ibv_cq           *cq_poll  = NULL;  /* Busy-polling CQ (for comparison) */
     struct ibv_qp           *qp       = NULL;
     struct ibv_mr           *mr       = NULL;
     char                    *buffer   = NULL;
     int                      num_devices;
     int                      ret;
-    unsigned int             events_completed = 0;  /* 已确认的事件计数 */
+    unsigned int             events_completed = 0;  /* Acknowledged event count */
 
     printf("============================================\n");
-    printf("  事件驱动型 CQ 完成通知演示\n");
+    printf("  Event-Driven CQ Completion Notification Demo\n");
     printf("============================================\n\n");
 
     /*
-     * 背景知识: CQ 完成通知的两种模式
+     * Background: Two modes of CQ completion notification
      *
-     * 模式 1: 忙轮询 (Busy Polling)
+     * Mode 1: Busy Polling
      *   while (1) { ne = ibv_poll_cq(cq, 1, &wc); if (ne > 0) break; }
-     *   + 优点: 延迟最低 (纳秒级)
-     *   - 缺点: CPU 100% 占用, 浪费 CPU 资源
+     *   + Pros: Lowest latency (nanosecond level)
+     *   - Cons: 100% CPU usage, wastes CPU resources
      *
-     * 模式 2: 事件驱动 (Event-Driven)
-     *   ibv_req_notify_cq(cq, 0);        // 注册通知
-     *   ibv_get_cq_event(channel, ...);   // 阻塞等待
-     *   ibv_poll_cq(cq, ...);             // 收到通知后再轮询
-     *   ibv_ack_cq_events(cq, 1);         // 确认事件
-     *   + 优点: CPU 友好, 适合低频场景
-     *   - 缺点: 有额外延迟 (微秒级), 需要内核参与
+     * Mode 2: Event-Driven
+     *   ibv_req_notify_cq(cq, 0);        // Register notification
+     *   ibv_get_cq_event(channel, ...);   // Block-wait
+     *   ibv_poll_cq(cq, ...);             // Poll after receiving notification
+     *   ibv_ack_cq_events(cq, 1);         // Acknowledge event
+     *   + Pros: CPU-friendly, suitable for low-frequency scenarios
+     *   - Cons: Extra latency (microsecond level), requires kernel involvement
      *
-     * 实践中常用混合模式: 先忙轮询一段时间, 无事件则切换到事件等待。
+     * In practice, a hybrid mode is often used: busy-poll for a while first,
+     * then switch to event-wait if no events arrive.
      */
 
-    /* ========== 步骤 1: 初始化基础资源 ========== */
-    printf("[步骤1] 初始化基础 RDMA 资源\n");
+    /* ========== Step 1: Initialize basic resources ========== */
+    printf("[Step 1] Initialize basic RDMA resources\n");
     dev_list = ibv_get_device_list(&num_devices);
-    CHECK_NULL(dev_list, "获取设备列表失败");
+    CHECK_NULL(dev_list, "Failed to get device list");
     if (num_devices == 0) {
-        fprintf(stderr, "[错误] 未发现 RDMA 设备\n");
+        fprintf(stderr, "[Error] No RDMA devices found\n");
         goto cleanup;
     }
     ctx = ibv_open_device(dev_list[0]);
-    CHECK_NULL(ctx, "打开设备失败");
-    printf("  设备: %s\n", ibv_get_device_name(dev_list[0]));
+    CHECK_NULL(ctx, "Failed to open device");
+    printf("  Device: %s\n", ibv_get_device_name(dev_list[0]));
 
     pd = ibv_alloc_pd(ctx);
-    CHECK_NULL(pd, "分配 PD 失败");
+    CHECK_NULL(pd, "Failed to allocate PD");
 
     buffer = malloc(BUFFER_SIZE);
-    CHECK_NULL(buffer, "malloc 失败");
+    CHECK_NULL(buffer, "malloc failed");
     memset(buffer, 0, BUFFER_SIZE);
 
     mr = ibv_reg_mr(pd, buffer, BUFFER_SIZE,
                      IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
-    CHECK_NULL(mr, "注册 MR 失败");
-    printf("  PD, MR 创建完成\n\n");
+    CHECK_NULL(mr, "Failed to register MR");
+    printf("  PD, MR created\n\n");
 
-    /* ========== 步骤 2: 创建完成通知通道 ========== */
-    printf("[步骤2] 创建完成通知通道 (Completion Channel)\n");
+    /* ========== Step 2: Create completion notification channel ========== */
+    printf("[Step 2] Create Completion Notification Channel\n");
 
     /*
-     * ibv_create_comp_channel() 创建一个 fd (文件描述符),
-     * 用于 select/poll/epoll 等 I/O 多路复用。
-     * CQ 事件到达时, 这个 fd 变为可读。
+     * ibv_create_comp_channel() creates an fd (file descriptor),
+     * which can be used with select/poll/epoll for I/O multiplexing.
+     * When a CQ event arrives, this fd becomes readable.
      */
     channel = ibv_create_comp_channel(ctx);
-    CHECK_NULL(channel, "创建 Completion Channel 失败");
-    printf("  Channel 创建成功, fd=%d\n", channel->fd);
-    printf("  → 可用于 select/poll/epoll 多路复用\n\n");
+    CHECK_NULL(channel, "Failed to create Completion Channel");
+    printf("  Channel created successfully, fd=%d\n", channel->fd);
+    printf("  -> Can be used with select/poll/epoll multiplexing\n\n");
 
-    /* ========== 步骤 3: 创建事件驱动 CQ ========== */
-    printf("[步骤3] 创建事件驱动 CQ (关联 Channel)\n");
+    /* ========== Step 3: Create event-driven CQ ========== */
+    printf("[Step 3] Create event-driven CQ (associated with Channel)\n");
 
     /*
-     * ibv_create_cq() 的第 4 个参数是 comp_channel:
-     *   - NULL: 不关联通道 (仅支持忙轮询)
-     *   - channel: 关联通道 (支持事件通知)
+     * The 4th parameter of ibv_create_cq() is comp_channel:
+     *   - NULL: No channel association (busy polling only)
+     *   - channel: Associate channel (supports event notification)
      *
-     * 第 5 个参数 comp_vector: 用于选择中断向量 (多核负载均衡)
+     * The 5th parameter comp_vector: selects interrupt vector (multi-core load balancing)
      */
     cq_event = ibv_create_cq(ctx, CQ_DEPTH, NULL, channel, 0);
-    CHECK_NULL(cq_event, "创建事件驱动 CQ 失败");
-    printf("  事件驱动 CQ 创建成功 (深度=%d, 关联 channel fd=%d)\n",
+    CHECK_NULL(cq_event, "Failed to create event-driven CQ");
+    printf("  Event-driven CQ created (depth=%d, associated channel fd=%d)\n",
            CQ_DEPTH, channel->fd);
 
-    /* 同时创建一个普通 CQ (用于对比) */
+    /* Also create a regular CQ (for comparison) */
     cq_poll = ibv_create_cq(ctx, CQ_DEPTH, NULL, NULL, 0);
-    CHECK_NULL(cq_poll, "创建轮询 CQ 失败");
-    printf("  轮询 CQ 创建成功 (无 channel, 仅支持忙轮询)\n\n");
+    CHECK_NULL(cq_poll, "Failed to create polling CQ");
+    printf("  Polling CQ created (no channel, busy polling only)\n\n");
 
-    /* ========== 步骤 4: 创建 QP 并连接 (loopback) ========== */
-    printf("[步骤4] 创建 QP 并建立 loopback 连接\n");
+    /* ========== Step 4: Create QP and connect (loopback) ========== */
+    printf("[Step 4] Create QP and establish loopback connection\n");
 
     struct ibv_qp_init_attr qp_init = {
-        .send_cq = cq_event,   /* 发送完成走事件驱动 CQ */
-        .recv_cq = cq_event,   /* 接收完成也走事件驱动 CQ */
+        .send_cq = cq_event,   /* Send completions go to event-driven CQ */
+        .recv_cq = cq_event,   /* Recv completions also go to event-driven CQ */
         .qp_type = IBV_QPT_RC,
         .cap = {
             .max_send_wr  = 16,
@@ -138,36 +140,36 @@ int main(int argc, char *argv[])
         },
     };
     qp = ibv_create_qp(pd, &qp_init);
-    CHECK_NULL(qp, "创建 QP 失败");
-    printf("  QP 创建成功, qp_num=%u\n", qp->qp_num);
+    CHECK_NULL(qp, "Failed to create QP");
+    printf("  QP created successfully, qp_num=%u\n", qp->qp_num);
 
-    /* loopback 连接 */
+    /* loopback connection */
     struct rdma_endpoint local_ep;
     ret = fill_local_endpoint(ctx, qp, PORT_NUM, RDMA_DEFAULT_GID_INDEX, &local_ep);
-    CHECK_ERRNO(ret, "填充端点信息失败");
+    CHECK_ERRNO(ret, "Failed to fill endpoint info");
 
     enum rdma_transport transport = detect_transport(ctx, PORT_NUM);
     int is_roce = (transport == RDMA_TRANSPORT_ROCE);
-    printf("  传输类型: %s\n", transport_str(transport));
+    printf("  Transport type: %s\n", transport_str(transport));
 
     int access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE;
     ret = qp_full_connect(qp, &local_ep, PORT_NUM, is_roce, access);
     if (ret != 0) {
-        printf("  QP 连接失败, 跳过事件通知测试\n");
-        printf("  → 提示: 确保端口状态为 ACTIVE\n");
+        printf("  QP connection failed, skipping event notification test\n");
+        printf("  -> Hint: Ensure port state is ACTIVE\n");
         goto cleanup;
     }
-    printf("  QP 已连接 (loopback, RTS 状态)\n\n");
+    printf("  QP connected (loopback, RTS state)\n\n");
 
-    /* ========== 步骤 5: 事件驱动完成通知流程 ========== */
+    /* ========== Step 5: Event-driven completion notification flow ========== */
     printf("========================================\n");
-    printf("[步骤5] 事件驱动完成通知流程\n");
+    printf("[Step 5] Event-driven completion notification flow\n");
     printf("========================================\n\n");
 
     /*
-     * 步骤 5a: 先 Post Recv (接收端准备好)
+     * Step 5a: Post Recv first (receiver ready)
      */
-    printf("  5a. Post Recv (准备接收缓冲区)\n");
+    printf("  5a. Post Recv (prepare receive buffer)\n");
     struct ibv_sge recv_sge = {
         .addr   = (uintptr_t)buffer,
         .length = MSG_SIZE,
@@ -180,28 +182,28 @@ int main(int argc, char *argv[])
     };
     struct ibv_recv_wr *bad_recv = NULL;
     ret = ibv_post_recv(qp, &recv_wr, &bad_recv);
-    CHECK_ERRNO(ret, "ibv_post_recv 失败");
-    printf("      Recv WR 已提交 (wr_id=1000)\n");
+    CHECK_ERRNO(ret, "ibv_post_recv failed");
+    printf("      Recv WR submitted (wr_id=1000)\n");
 
     /*
-     * 步骤 5b: Arm CQ — 注册完成通知
+     * Step 5b: Arm CQ -- register completion notification
      *
      * ibv_req_notify_cq(cq, solicited_only):
-     *   - solicited_only=0: 所有完成事件都通知
-     *   - solicited_only=1: 仅 Send with Solicited 标志的完成才通知
+     *   - solicited_only=0: Notify on all completion events
+     *   - solicited_only=1: Only notify on completions with Solicited flag
      *
-     * 注意: 必须在 ibv_get_cq_event() 之前调用!
-     *        arm 是一次性的, 每次 get_event 后必须重新 arm。
+     * Note: Must be called before ibv_get_cq_event()!
+     *        Arm is one-shot, must re-arm after each get_event.
      */
     printf("  5b. Arm CQ (ibv_req_notify_cq)\n");
     ret = ibv_req_notify_cq(cq_event, 0);
-    CHECK_ERRNO(ret, "ibv_req_notify_cq 失败");
-    printf("      CQ 通知已注册 (solicited_only=0)\n");
+    CHECK_ERRNO(ret, "ibv_req_notify_cq failed");
+    printf("      CQ notification registered (solicited_only=0)\n");
 
     /*
-     * 步骤 5c: Post Send (触发完成事件)
+     * Step 5c: Post Send (trigger completion event)
      */
-    printf("  5c. Post Send (触发 loopback Send/Recv)\n");
+    printf("  5c. Post Send (trigger loopback Send/Recv)\n");
     snprintf(buffer + MSG_SIZE, MSG_SIZE, "Hello RDMA Event-Driven!");
     struct ibv_sge send_sge = {
         .addr   = (uintptr_t)(buffer + MSG_SIZE),
@@ -217,35 +219,36 @@ int main(int argc, char *argv[])
     };
     struct ibv_send_wr *bad_send = NULL;
     ret = ibv_post_send(qp, &send_wr, &bad_send);
-    CHECK_ERRNO(ret, "ibv_post_send 失败");
-    printf("      Send WR 已提交 (wr_id=2000)\n");
+    CHECK_ERRNO(ret, "ibv_post_send failed");
+    printf("      Send WR submitted (wr_id=2000)\n");
 
     /*
-     * 步骤 5d: 阻塞等待 CQ 事件
+     * Step 5d: Block-wait for CQ event
      *
-     * ibv_get_cq_event() 会阻塞直到:
-     *   - CQ 上有新的完成事件到达
-     *   - 底层 fd 变为可读
+     * ibv_get_cq_event() blocks until:
+     *   - A new completion event arrives on the CQ
+     *   - The underlying fd becomes readable
      *
-     * 实际生产中, 常用 poll()/epoll() 来监控 channel->fd,
-     * 配合超时机制, 避免永久阻塞。
+     * In production, poll()/epoll() is often used to monitor channel->fd,
+     * with timeout mechanisms to avoid permanent blocking.
      */
-    printf("  5d. 等待 CQ 事件 (ibv_get_cq_event, 阻塞)...\n");
+    printf("  5d. Waiting for CQ event (ibv_get_cq_event, blocking)...\n");
 
     struct ibv_cq *ev_cq = NULL;
     void *ev_ctx = NULL;
     ret = ibv_get_cq_event(channel, &ev_cq, &ev_ctx);
-    CHECK_ERRNO(ret, "ibv_get_cq_event 失败");
+    CHECK_ERRNO(ret, "ibv_get_cq_event failed");
     events_completed++;
-    printf("      ✓ 收到 CQ 事件通知! (ev_cq=%p)\n", (void *)ev_cq);
+    printf("      Received CQ event notification! (ev_cq=%p)\n", (void *)ev_cq);
 
     /*
-     * 步骤 5e: 收到通知后, 轮询 CQ 获取所有完成事件
+     * Step 5e: After receiving notification, poll CQ to get all completion events
      *
-     * 重要: 一次 CQ 事件通知可能对应多个 WC (完成事件合并)。
-     * 必须循环 poll 直到返回 0, 确保取出所有完成事件。
+     * Important: A single CQ event notification may correspond to multiple WCs
+     * (completion event coalescing). Must loop poll until 0 is returned to ensure
+     * all completion events are retrieved.
      */
-    printf("  5e. 轮询 CQ 获取完成事件\n");
+    printf("  5e. Poll CQ to get completion events\n");
     struct ibv_wc wc;
     int ne, total = 0;
     while ((ne = ibv_poll_cq(cq_event, 1, &wc)) > 0) {
@@ -255,54 +258,56 @@ int main(int argc, char *argv[])
                ibv_wc_status_str(wc.status),
                wc_opcode_str(wc.opcode));
     }
-    printf("      共收到 %d 个完成事件\n", total);
+    printf("      Received %d completion event(s) in total\n", total);
 
     /*
-     * 步骤 5f: 确认 CQ 事件 (必须!)
+     * Step 5f: Acknowledge CQ events (required!)
      *
-     * ibv_ack_cq_events() 必须在 ibv_destroy_cq() 之前被调用,
-     * 确认所有收到的事件。如果不确认, ibv_destroy_cq() 会阻塞。
+     * ibv_ack_cq_events() must be called before ibv_destroy_cq()
+     * to acknowledge all received events. If not acknowledged,
+     * ibv_destroy_cq() will block.
      *
-     * 可以批量确认: 累积 N 次 get_event, 然后 ack_events(cq, N)。
+     * Can batch acknowledge: accumulate N get_events, then ack_events(cq, N).
      */
-    printf("  5f. 确认 CQ 事件 (ibv_ack_cq_events)\n");
+    printf("  5f. Acknowledge CQ events (ibv_ack_cq_events)\n");
     ibv_ack_cq_events(cq_event, events_completed);
-    printf("      已确认 %u 个事件\n", events_completed);
+    printf("      Acknowledged %u event(s)\n", events_completed);
     events_completed = 0;
 
     /*
-     * 步骤 5g: 重新 Arm CQ (如需继续监听)
+     * Step 5g: Re-arm CQ (if continuing to listen)
      *
-     * arm 是一次性的! 每次 get_event 后都要重新 arm。
-     * 推荐在 poll CQ 完成后立即 re-arm, 减少丢失通知的窗口。
+     * Arm is one-shot! Must re-arm after each get_event.
+     * Recommended to re-arm immediately after polling CQ to minimize
+     * the notification miss window.
      */
-    printf("  5g. 重新 Arm CQ (如需继续监听)\n");
+    printf("  5g. Re-arm CQ (if continuing to listen)\n");
     ret = ibv_req_notify_cq(cq_event, 0);
-    CHECK_ERRNO(ret, "re-arm ibv_req_notify_cq 失败");
-    printf("      CQ 已重新 arm, 可继续等待下一轮事件\n");
+    CHECK_ERRNO(ret, "re-arm ibv_req_notify_cq failed");
+    printf("      CQ re-armed, ready to wait for next round of events\n");
 
-    /* ========== 总结 ========== */
+    /* ========== Summary ========== */
     printf("\n============================================\n");
-    printf("  事件驱动 CQ 总结\n");
+    printf("  Event-Driven CQ Summary\n");
     printf("============================================\n");
-    printf("  完整流程:\n");
-    printf("    1. ibv_create_comp_channel()      → 创建通道\n");
-    printf("    2. ibv_create_cq(..., channel, 0)  → CQ 关联通道\n");
-    printf("    3. ibv_req_notify_cq(cq, 0)        → Arm CQ\n");
-    printf("    4. ibv_post_send/recv(...)          → 提交 WR\n");
-    printf("    5. ibv_get_cq_event(channel, ...)   → 阻塞等待\n");
-    printf("    6. ibv_poll_cq() 循环              → 取出所有 WC\n");
-    printf("    7. ibv_ack_cq_events(cq, N)        → 确认事件\n");
-    printf("    8. 回到步骤 3 (re-arm)\n\n");
-    printf("  忙轮询 vs 事件驱动:\n");
-    printf("    忙轮询: 延迟 ~100ns, CPU 100%%\n");
-    printf("    事件驱动: 延迟 ~5-10us, CPU 几乎为 0\n");
-    printf("    混合模式: 先轮询 N 次, 无果则切换事件等待\n\n");
+    printf("  Complete flow:\n");
+    printf("    1. ibv_create_comp_channel()      -> Create channel\n");
+    printf("    2. ibv_create_cq(..., channel, 0)  -> Associate CQ with channel\n");
+    printf("    3. ibv_req_notify_cq(cq, 0)        -> Arm CQ\n");
+    printf("    4. ibv_post_send/recv(...)          -> Submit WR\n");
+    printf("    5. ibv_get_cq_event(channel, ...)   -> Block-wait\n");
+    printf("    6. ibv_poll_cq() loop               -> Retrieve all WCs\n");
+    printf("    7. ibv_ack_cq_events(cq, N)        -> Acknowledge events\n");
+    printf("    8. Go back to step 3 (re-arm)\n\n");
+    printf("  Busy polling vs Event-driven:\n");
+    printf("    Busy polling: latency ~100ns, CPU 100%%\n");
+    printf("    Event-driven: latency ~5-10us, CPU nearly 0\n");
+    printf("    Hybrid mode: poll N times first, switch to event-wait if nothing arrives\n\n");
 
 cleanup:
-    printf("[清理] 释放资源...\n");
+    printf("[Cleanup] Releasing resources...\n");
 
-    /* 如有未确认事件, 必须先确认 */
+    /* If there are unacknowledged events, must acknowledge first */
     if (events_completed > 0 && cq_event) {
         ibv_ack_cq_events(cq_event, events_completed);
     }
@@ -317,6 +322,6 @@ cleanup:
     if (ctx)      ibv_close_device(ctx);
     if (dev_list) ibv_free_device_list(dev_list);
 
-    printf("  完成\n");
+    printf("  Done\n");
     return 0;
 }

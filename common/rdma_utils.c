@@ -1,22 +1,22 @@
 /**
- * RDMA 公共工具库 - 实现文件
+ * RDMA Common Utility Library - Implementation File
  *
- * 提供 IB/RoCE 双模支持的统一抽象函数实现。
+ * Provides unified abstraction function implementations with IB/RoCE dual-mode support.
  *
- * 编译: gcc -c rdma_utils.c -o rdma_utils.o -Wall -O2
- *       ar rcs librdma_utils.a rdma_utils.o
+ * Build: gcc -c rdma_utils.c -o rdma_utils.o -Wall -O2
+ *        ar rcs librdma_utils.a rdma_utils.o
  */
 
 #include "rdma_utils.h"
 
-/* ========== 传输层检测 ========== */
+/* ========== Transport Layer Detection ========== */
 
 enum rdma_transport detect_transport(struct ibv_context *ctx, uint8_t port)
 {
     struct ibv_port_attr port_attr;
 
     if (ibv_query_port(ctx, port, &port_attr) != 0) {
-        fprintf(stderr, "[detect_transport] 查询端口 %d 失败: %s\n",
+        fprintf(stderr, "[detect_transport] Failed to query port %d: %s\n",
                 port, strerror(errno));
         return RDMA_TRANSPORT_UNKNOWN;
     }
@@ -26,11 +26,10 @@ enum rdma_transport detect_transport(struct ibv_context *ctx, uint8_t port)
         return RDMA_TRANSPORT_IB;
     case IBV_LINK_LAYER_ETHERNET:
         /*
-         * 以太网链路层可能是 RoCE 或 iWARP。
-         * 进一步通过设备的 transport_type 判断。
-         * 注: ibv_get_device_name 对应的设备若 transport == IB 则为 RoCE，
-         *     transport == IWARP 则为 iWARP。但在 verbs API 中,
-         *     RoCE 设备的 node_type 是 IBV_NODE_CA, transport_type 是 IBV_TRANSPORT_IB。
+         * Ethernet link layer could be RoCE or iWARP.
+         * Further distinguish via device's transport_type.
+         * Note: In verbs API, RoCE device's node_type is IBV_NODE_CA,
+         *       transport_type is IBV_TRANSPORT_IB.
          */
         return RDMA_TRANSPORT_ROCE;
     default:
@@ -49,53 +48,53 @@ const char *transport_str(enum rdma_transport t)
     }
 }
 
-/* ========== 设备查询与打印 ========== */
+/* ========== Device Query and Printing ========== */
 
 int query_and_print_device(struct ibv_context *ctx)
 {
     struct ibv_device_attr dev_attr;
 
     if (ibv_query_device(ctx, &dev_attr) != 0) {
-        fprintf(stderr, "[query_and_print_device] ibv_query_device 失败: %s\n",
+        fprintf(stderr, "[query_and_print_device] ibv_query_device failed: %s\n",
                 strerror(errno));
         return -1;
     }
 
-    printf("=== 设备能力参数 ===\n");
-    printf("  固件版本 (fw_ver):          %s\n",   dev_attr.fw_ver);
-    printf("  节点 GUID (node_guid):      0x%016lx\n", (unsigned long)dev_attr.node_guid);
-    printf("  系统镜像 GUID:              0x%016lx\n", (unsigned long)dev_attr.sys_image_guid);
-    printf("  最大 MR 大小:               %lu bytes\n", (unsigned long)dev_attr.max_mr_size);
-    printf("  页面大小掩码:               0x%lx\n", (unsigned long)dev_attr.page_size_cap);
-    printf("  厂商 ID:                    0x%x\n",  dev_attr.vendor_id);
-    printf("  厂商 Part ID:               %d\n",    dev_attr.vendor_part_id);
-    printf("  硬件版本:                   %d\n",    dev_attr.hw_ver);
-    printf("  物理端口数:                 %d\n",    dev_attr.phys_port_cnt);
-    printf("  --- 队列和完成队列 ---\n");
-    printf("  最大 QP 数量 (max_qp):      %d\n",    dev_attr.max_qp);
-    printf("  每个 QP 最大 WR (max_qp_wr): %d\n",   dev_attr.max_qp_wr);
-    printf("  每个 WR 最大 SGE (max_sge):  %d\n",   dev_attr.max_sge);
-    printf("  最大 SRQ 数量:              %d\n",    dev_attr.max_srq);
-    printf("  每个 SRQ 最大 WR:           %d\n",    dev_attr.max_srq_wr);
-    printf("  最大 CQ 数量 (max_cq):      %d\n",    dev_attr.max_cq);
-    printf("  每个 CQ 最大 CQE (max_cqe): %d\n",    dev_attr.max_cqe);
-    printf("  --- 内存区域 ---\n");
-    printf("  最大 MR 数量 (max_mr):      %d\n",    dev_attr.max_mr);
-    printf("  最大 PD 数量 (max_pd):      %d\n",    dev_attr.max_pd);
-    printf("  --- 原子操作 ---\n");
-    printf("  原子操作能力 (atomic_cap):  ");
+    printf("=== Device Capability Parameters ===\n");
+    printf("  Firmware version (fw_ver):    %s\n",   dev_attr.fw_ver);
+    printf("  Node GUID (node_guid):        0x%016lx\n", (unsigned long)dev_attr.node_guid);
+    printf("  System image GUID:            0x%016lx\n", (unsigned long)dev_attr.sys_image_guid);
+    printf("  Max MR size:                  %lu bytes\n", (unsigned long)dev_attr.max_mr_size);
+    printf("  Page size mask:               0x%lx\n", (unsigned long)dev_attr.page_size_cap);
+    printf("  Vendor ID:                    0x%x\n",  dev_attr.vendor_id);
+    printf("  Vendor Part ID:               %d\n",    dev_attr.vendor_part_id);
+    printf("  Hardware version:             %d\n",    dev_attr.hw_ver);
+    printf("  Physical port count:          %d\n",    dev_attr.phys_port_cnt);
+    printf("  --- Queues and Completion Queues ---\n");
+    printf("  Max QP count (max_qp):        %d\n",    dev_attr.max_qp);
+    printf("  Max WR per QP (max_qp_wr):    %d\n",   dev_attr.max_qp_wr);
+    printf("  Max SGE per WR (max_sge):     %d\n",   dev_attr.max_sge);
+    printf("  Max SRQ count:                %d\n",    dev_attr.max_srq);
+    printf("  Max WR per SRQ:               %d\n",    dev_attr.max_srq_wr);
+    printf("  Max CQ count (max_cq):        %d\n",    dev_attr.max_cq);
+    printf("  Max CQE per CQ (max_cqe):     %d\n",    dev_attr.max_cqe);
+    printf("  --- Memory Regions ---\n");
+    printf("  Max MR count (max_mr):        %d\n",    dev_attr.max_mr);
+    printf("  Max PD count (max_pd):        %d\n",    dev_attr.max_pd);
+    printf("  --- Atomic Operations ---\n");
+    printf("  Atomic capability (atomic_cap): ");
     switch (dev_attr.atomic_cap) {
-    case IBV_ATOMIC_NONE:  printf("NONE (不支持)\n"); break;
-    case IBV_ATOMIC_HCA:   printf("HCA (仅本 HCA 内原子)\n"); break;
-    case IBV_ATOMIC_GLOB:  printf("GLOBAL (全局原子)\n"); break;
-    default:               printf("%d (未知)\n", dev_attr.atomic_cap); break;
+    case IBV_ATOMIC_NONE:  printf("NONE (not supported)\n"); break;
+    case IBV_ATOMIC_HCA:   printf("HCA (atomic within this HCA only)\n"); break;
+    case IBV_ATOMIC_GLOB:  printf("GLOBAL (global atomic)\n"); break;
+    default:               printf("%d (unknown)\n", dev_attr.atomic_cap); break;
     }
-    printf("  最大 QP RD 原子操作数:      %d\n",    dev_attr.max_qp_rd_atom);
-    printf("  最大 QP INIT RD 原子操作数: %d\n",    dev_attr.max_qp_init_rd_atom);
-    printf("  --- 多播 ---\n");
-    printf("  最大多播组数:               %d\n",    dev_attr.max_mcast_grp);
-    printf("  每个多播组最大 QP 数:       %d\n",    dev_attr.max_mcast_qp_attach);
-    printf("  最大 AH 数量:               %d\n",    dev_attr.max_ah);
+    printf("  Max QP RD atomic ops:         %d\n",    dev_attr.max_qp_rd_atom);
+    printf("  Max QP INIT RD atomic ops:    %d\n",    dev_attr.max_qp_init_rd_atom);
+    printf("  --- Multicast ---\n");
+    printf("  Max multicast groups:         %d\n",    dev_attr.max_mcast_grp);
+    printf("  Max QPs per multicast group:  %d\n",    dev_attr.max_mcast_qp_attach);
+    printf("  Max AH count:                 %d\n",    dev_attr.max_ah);
     printf("========================\n");
 
     return 0;
@@ -106,27 +105,27 @@ int query_and_print_port(struct ibv_context *ctx, uint8_t port)
     struct ibv_port_attr attr;
 
     if (ibv_query_port(ctx, port, &attr) != 0) {
-        fprintf(stderr, "[query_and_print_port] 查询端口 %d 失败: %s\n",
+        fprintf(stderr, "[query_and_print_port] Failed to query port %d: %s\n",
                 port, strerror(errno));
         return -1;
     }
 
-    printf("=== 端口 %d 属性 ===\n", port);
+    printf("=== Port %d Attributes ===\n", port);
 
-    /* 端口状态 */
-    printf("  状态 (state):     ");
+    /* Port state */
+    printf("  State:                 ");
     switch (attr.state) {
-    case IBV_PORT_NOP:          printf("NOP (未激活)\n"); break;
-    case IBV_PORT_DOWN:         printf("DOWN (链路断开)\n"); break;
-    case IBV_PORT_INIT:         printf("INIT (初始化中)\n"); break;
-    case IBV_PORT_ARMED:        printf("ARMED (准备就绪)\n"); break;
-    case IBV_PORT_ACTIVE:       printf("ACTIVE (活动)\n"); break;
+    case IBV_PORT_NOP:          printf("NOP (inactive)\n"); break;
+    case IBV_PORT_DOWN:         printf("DOWN (link down)\n"); break;
+    case IBV_PORT_INIT:         printf("INIT (initializing)\n"); break;
+    case IBV_PORT_ARMED:        printf("ARMED (ready)\n"); break;
+    case IBV_PORT_ACTIVE:       printf("ACTIVE\n"); break;
     case IBV_PORT_ACTIVE_DEFER: printf("ACTIVE_DEFER\n"); break;
-    default:                    printf("%d (未知)\n", attr.state); break;
+    default:                    printf("%d (unknown)\n", attr.state); break;
     }
 
     /* MTU */
-    printf("  最大 MTU (max_mtu):    ");
+    printf("  Max MTU (max_mtu):     ");
     switch (attr.max_mtu) {
     case IBV_MTU_256:  printf("256\n"); break;
     case IBV_MTU_512:  printf("512\n"); break;
@@ -136,7 +135,7 @@ int query_and_print_port(struct ibv_context *ctx, uint8_t port)
     default:           printf("%d\n", attr.max_mtu); break;
     }
 
-    printf("  活动 MTU (active_mtu): ");
+    printf("  Active MTU (active_mtu): ");
     switch (attr.active_mtu) {
     case IBV_MTU_256:  printf("256\n"); break;
     case IBV_MTU_512:  printf("512\n"); break;
@@ -146,27 +145,27 @@ int query_and_print_port(struct ibv_context *ctx, uint8_t port)
     default:           printf("%d\n", attr.active_mtu); break;
     }
 
-    /* 链路层 */
-    printf("  链路层 (link_layer): ");
+    /* Link layer */
+    printf("  Link layer:            ");
     switch (attr.link_layer) {
-    case IBV_LINK_LAYER_UNSPECIFIED:  printf("未指定\n"); break;
+    case IBV_LINK_LAYER_UNSPECIFIED:  printf("Unspecified\n"); break;
     case IBV_LINK_LAYER_INFINIBAND:   printf("InfiniBand\n"); break;
     case IBV_LINK_LAYER_ETHERNET:     printf("Ethernet (RoCE)\n"); break;
-    default:                          printf("%d (未知)\n", attr.link_layer); break;
+    default:                          printf("%d (unknown)\n", attr.link_layer); break;
     }
 
-    /* 地址信息 */
+    /* Address info */
     printf("  LID:                   %u", attr.lid);
     if (attr.lid == 0) {
-        printf("  (LID=0 表示 RoCE 模式，需使用 GID 寻址)");
+        printf("  (LID=0 indicates RoCE mode, use GID for addressing)");
     }
     printf("\n");
     printf("  SM LID:                %u\n",   attr.sm_lid);
-    printf("  GID 表大小:            %d\n",    attr.gid_tbl_len);
-    printf("  P_Key 表大小:          %u\n",   attr.pkey_tbl_len);
+    printf("  GID table size:        %d\n",    attr.gid_tbl_len);
+    printf("  P_Key table size:      %u\n",   attr.pkey_tbl_len);
 
-    /* 速率 */
-    printf("  活动速率:              %u Gbps (width=%d, speed=%d)\n",
+    /* Speed */
+    printf("  Active speed:          %u Gbps (width=%d, speed=%d)\n",
            (unsigned)(attr.active_width * attr.active_speed),
            attr.active_width, attr.active_speed);
 
@@ -183,18 +182,18 @@ int query_and_print_all_gids(struct ibv_context *ctx, uint8_t port)
     int i;
 
     if (ibv_query_port(ctx, port, &port_attr) != 0) {
-        fprintf(stderr, "[query_and_print_all_gids] 查询端口 %d 失败\n", port);
+        fprintf(stderr, "[query_and_print_all_gids] Failed to query port %d\n", port);
         return -1;
     }
 
-    printf("=== 端口 %d GID 表 (共 %d 个条目) ===\n", port, port_attr.gid_tbl_len);
+    printf("=== Port %d GID Table (%d entries) ===\n", port, port_attr.gid_tbl_len);
 
     for (i = 0; i < port_attr.gid_tbl_len; i++) {
         if (ibv_query_gid(ctx, port, i, &gid) != 0) {
             continue;
         }
 
-        /* 跳过全零 GID (未配置的条目) */
+        /* Skip all-zero GIDs (unconfigured entries) */
         int is_zero = 1;
         for (int j = 0; j < 16; j++) {
             if (gid.raw[j] != 0) { is_zero = 0; break; }
@@ -226,7 +225,7 @@ void gid_to_str(const union ibv_gid *gid, char *buf, size_t buflen)
              gid->raw[12], gid->raw[13], gid->raw[14], gid->raw[15]);
 }
 
-/* ========== QP 状态转换 ========== */
+/* ========== QP State Transitions ========== */
 
 int qp_to_init(struct ibv_qp *qp, uint8_t port, int access_flags)
 {
@@ -242,7 +241,7 @@ int qp_to_init(struct ibv_qp *qp, uint8_t port, int access_flags)
                             IBV_QP_STATE | IBV_QP_PKEY_INDEX |
                             IBV_QP_PORT | IBV_QP_ACCESS_FLAGS);
     if (ret != 0) {
-        fprintf(stderr, "[qp_to_init] RESET→INIT 失败: %s (errno=%d)\n",
+        fprintf(stderr, "[qp_to_init] RESET->INIT failed: %s (errno=%d)\n",
                 strerror(errno), errno);
     }
     return ret;
@@ -259,28 +258,28 @@ int qp_to_rtr(struct ibv_qp *qp, const struct rdma_endpoint *remote,
     attr.dest_qp_num        = remote->qp_num;
     attr.rq_psn             = remote->psn;
     attr.max_dest_rd_atomic = 1;
-    attr.min_rnr_timer      = 12;  /* 12 ≈ 0.01ms，合理的 RNR NAK 超时 */
+    attr.min_rnr_timer      = 12;  /* 12 ~ 0.01ms, reasonable RNR NAK timeout */
 
-    /* 地址向量 (Address Vector) */
+    /* Address Vector */
     attr.ah_attr.sl         = RDMA_DEFAULT_SL;
     attr.ah_attr.port_num   = port;
 
     if (is_roce) {
         /*
-         * RoCE 模式: 必须设置 is_global=1，并填充 GRH (Global Route Header)。
-         * dgid 填对端的 GID，sgid_index 填本地 GID 表中的索引。
+         * RoCE mode: must set is_global=1 and fill GRH (Global Route Header).
+         * dgid is the remote GID, sgid_index is the index in the local GID table.
          */
         attr.ah_attr.is_global      = 1;
         attr.ah_attr.grh.dgid       = remote->gid;
         attr.ah_attr.grh.sgid_index = remote->gid_index;
-        attr.ah_attr.grh.hop_limit  = 64;  /* 允许跨路由器 */
+        attr.ah_attr.grh.hop_limit  = 64;  /* Allow cross-router */
         attr.ah_attr.grh.flow_label = 0;
         attr.ah_attr.grh.traffic_class = 0;
-        /* RoCE 模式下 dlid 可设为 0 或任意值，不影响寻址 */
+        /* In RoCE mode, dlid can be set to 0 or any value; it doesn't affect addressing */
         attr.ah_attr.dlid = 0;
     } else {
         /*
-         * IB 模式: 使用 LID 寻址，is_global=0 (子网内通信不需要 GRH)。
+         * IB mode: uses LID addressing, is_global=0 (GRH not needed for intra-subnet).
          */
         attr.ah_attr.is_global = 0;
         attr.ah_attr.dlid      = remote->lid;
@@ -292,14 +291,14 @@ int qp_to_rtr(struct ibv_qp *qp, const struct rdma_endpoint *remote,
                             IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER |
                             IBV_QP_AV);
     if (ret != 0) {
-        fprintf(stderr, "[qp_to_rtr] INIT→RTR 失败: %s (errno=%d)\n",
+        fprintf(stderr, "[qp_to_rtr] INIT->RTR failed: %s (errno=%d)\n",
                 strerror(errno), errno);
         if (is_roce) {
             char gid_str[46];
             gid_to_str(&remote->gid, gid_str, sizeof(gid_str));
-            fprintf(stderr, "  提示: RoCE 模式下请检查 GID 是否正确: %s\n", gid_str);
+            fprintf(stderr, "  Hint: In RoCE mode, check if GID is correct: %s\n", gid_str);
         } else {
-            fprintf(stderr, "  提示: IB 模式下请检查 LID 是否正确: %u\n", remote->lid);
+            fprintf(stderr, "  Hint: In IB mode, check if LID is correct: %u\n", remote->lid);
         }
     }
     return ret;
@@ -312,17 +311,17 @@ int qp_to_rts(struct ibv_qp *qp)
 
     attr.qp_state      = IBV_QPS_RTS;
     attr.sq_psn         = RDMA_DEFAULT_PSN;
-    attr.timeout        = 14;   /* 约 8.4 秒 (4.096us * 2^14) */
-    attr.retry_cnt      = 7;    /* 最大重传次数 */
-    attr.rnr_retry      = 7;    /* RNR NAK 最大重试次数 (7 = 无限重试) */
-    attr.max_rd_atomic  = 1;    /* 未完成的 RDMA Read/Atomic 操作数 */
+    attr.timeout        = 14;   /* About 8.4 seconds (4.096us * 2^14) */
+    attr.retry_cnt      = 7;    /* Max retry count */
+    attr.rnr_retry      = 7;    /* RNR NAK max retry count (7 = infinite retry) */
+    attr.max_rd_atomic  = 1;    /* Outstanding RDMA Read/Atomic operations */
 
     int ret = ibv_modify_qp(qp, &attr,
                             IBV_QP_STATE | IBV_QP_SQ_PSN |
                             IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
                             IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC);
     if (ret != 0) {
-        fprintf(stderr, "[qp_to_rts] RTR→RTS 失败: %s (errno=%d)\n",
+        fprintf(stderr, "[qp_to_rts] RTR->RTS failed: %s (errno=%d)\n",
                 strerror(errno), errno);
     }
     return ret;
@@ -337,7 +336,7 @@ int qp_to_reset(struct ibv_qp *qp)
 
     int ret = ibv_modify_qp(qp, &attr, IBV_QP_STATE);
     if (ret != 0) {
-        fprintf(stderr, "[qp_to_reset] →RESET 失败: %s (errno=%d)\n",
+        fprintf(stderr, "[qp_to_reset] ->RESET failed: %s (errno=%d)\n",
                 strerror(errno), errno);
     }
     return ret;
@@ -348,15 +347,15 @@ int qp_full_connect(struct ibv_qp *qp, const struct rdma_endpoint *remote,
 {
     int ret;
 
-    /* RESET → INIT */
+    /* RESET -> INIT */
     ret = qp_to_init(qp, port, access_flags);
     if (ret != 0) return ret;
 
-    /* INIT → RTR */
+    /* INIT -> RTR */
     ret = qp_to_rtr(qp, remote, port, is_roce);
     if (ret != 0) return ret;
 
-    /* RTR → RTS */
+    /* RTR -> RTS */
     ret = qp_to_rts(qp);
     if (ret != 0) return ret;
 
@@ -369,11 +368,11 @@ void print_qp_state(struct ibv_qp *qp)
     struct ibv_qp_init_attr init_attr;
 
     if (ibv_query_qp(qp, &attr, IBV_QP_STATE | IBV_QP_CUR_STATE, &init_attr) != 0) {
-        fprintf(stderr, "[print_qp_state] ibv_query_qp 失败\n");
+        fprintf(stderr, "[print_qp_state] ibv_query_qp failed\n");
         return;
     }
 
-    printf("  QP #%u 当前状态: %s (%d)\n",
+    printf("  QP #%u current state: %s (%d)\n",
            qp->qp_num, qp_state_str(attr.qp_state), attr.qp_state);
 }
 
@@ -391,7 +390,7 @@ const char *qp_state_str(enum ibv_qp_state state)
     }
 }
 
-/* ========== TCP 带外信息交换 ========== */
+/* ========== TCP Out-of-Band Information Exchange ========== */
 
 int exchange_endpoint_tcp(const char *server_ip, int tcp_port,
                           const struct rdma_endpoint *local,
@@ -411,9 +410,9 @@ int exchange_endpoint_tcp(const char *server_ip, int tcp_port,
     addr.sin_port = htons(tcp_port);
 
     if (server_ip) {
-        /* ---- 客户端模式：连接到服务器 ---- */
+        /* ---- Client mode: connect to server ---- */
         if (inet_pton(AF_INET, server_ip, &addr.sin_addr) <= 0) {
-            fprintf(stderr, "[exchange_endpoint_tcp] 无效的服务器 IP: %s\n", server_ip);
+            fprintf(stderr, "[exchange_endpoint_tcp] Invalid server IP: %s\n", server_ip);
             close(sock);
             return -1;
         }
@@ -424,7 +423,7 @@ int exchange_endpoint_tcp(const char *server_ip, int tcp_port,
             return -1;
         }
 
-        /* 先发后收 */
+        /* Send first, then receive */
         if (send(sock, local, sizeof(*local), 0) != sizeof(*local)) {
             perror("[exchange_endpoint_tcp] send local");
             goto out;
@@ -434,7 +433,7 @@ int exchange_endpoint_tcp(const char *server_ip, int tcp_port,
             goto out;
         }
     } else {
-        /* ---- 服务器模式：监听并等待连接 ---- */
+        /* ---- Server mode: listen and wait for connection ---- */
         int opt = 1;
         setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
         addr.sin_addr.s_addr = INADDR_ANY;
@@ -450,7 +449,7 @@ int exchange_endpoint_tcp(const char *server_ip, int tcp_port,
             return -1;
         }
 
-        printf("[信息交换] 监听端口 %d，等待客户端连接...\n", tcp_port);
+        printf("[Info Exchange] Listening on port %d, waiting for client connection...\n", tcp_port);
 
         int client_fd = accept(sock, NULL, NULL);
         if (client_fd < 0) {
@@ -459,7 +458,7 @@ int exchange_endpoint_tcp(const char *server_ip, int tcp_port,
             return -1;
         }
 
-        /* 先收后发 */
+        /* Receive first, then send */
         if (recv(client_fd, remote, sizeof(*remote), MSG_WAITALL) != sizeof(*remote)) {
             perror("[exchange_endpoint_tcp] recv remote");
             close(client_fd);
@@ -481,7 +480,7 @@ out:
     return ret;
 }
 
-/* ========== WC 完成事件处理 ========== */
+/* ========== WC Completion Event Handling ========== */
 
 const char *wc_opcode_str(enum ibv_wc_opcode opcode)
 {
@@ -500,7 +499,7 @@ const char *wc_opcode_str(enum ibv_wc_opcode opcode)
 
 void print_wc_detail(const struct ibv_wc *wc)
 {
-    printf("=== Work Completion 详情 ===\n");
+    printf("=== Work Completion Details ===\n");
     printf("  wr_id:       %lu\n",   (unsigned long)wc->wr_id);
     printf("  status:      %s (%d)\n", ibv_wc_status_str(wc->status), wc->status);
     printf("  opcode:      %s (%d)\n", wc_opcode_str(wc->opcode), wc->opcode);
@@ -509,7 +508,7 @@ void print_wc_detail(const struct ibv_wc *wc)
     printf("  src_qp:      %u\n",     wc->src_qp);
     printf("  vendor_err:  0x%x\n",   wc->vendor_err);
 
-    /* 如果有 Immediate Data */
+    /* If Immediate Data present */
     if (wc->wc_flags & IBV_WC_WITH_IMM) {
         printf("  imm_data:    0x%x (%u)\n",
                be32toh(wc->imm_data), be32toh(wc->imm_data));
@@ -525,22 +524,22 @@ int poll_cq_blocking(struct ibv_cq *cq, struct ibv_wc *wc)
     while (1) {
         ne = ibv_poll_cq(cq, 1, wc);
         if (ne < 0) {
-            fprintf(stderr, "[poll_cq_blocking] ibv_poll_cq 失败\n");
+            fprintf(stderr, "[poll_cq_blocking] ibv_poll_cq failed\n");
             return -1;
         }
         if (ne > 0) {
             if (wc->status != IBV_WC_SUCCESS) {
-                fprintf(stderr, "[poll_cq_blocking] 完成事件失败: %s (status=%d)\n",
+                fprintf(stderr, "[poll_cq_blocking] Completion event failed: %s (status=%d)\n",
                         ibv_wc_status_str(wc->status), wc->status);
                 return -1;
             }
             return 0;
         }
-        /* ne == 0: 继续轮询 */
+        /* ne == 0: continue polling */
     }
 }
 
-/* ========== 端点信息填充辅助 ========== */
+/* ========== Endpoint Info Fill Helper ========== */
 
 int fill_local_endpoint(struct ibv_context *ctx, struct ibv_qp *qp,
                         uint8_t port, int gid_index,
@@ -551,7 +550,7 @@ int fill_local_endpoint(struct ibv_context *ctx, struct ibv_qp *qp,
     memset(ep, 0, sizeof(*ep));
 
     if (ibv_query_port(ctx, port, &port_attr) != 0) {
-        fprintf(stderr, "[fill_local_endpoint] 查询端口 %d 失败\n", port);
+        fprintf(stderr, "[fill_local_endpoint] Failed to query port %d\n", port);
         return -1;
     }
 
@@ -561,10 +560,10 @@ int fill_local_endpoint(struct ibv_context *ctx, struct ibv_qp *qp,
     ep->gid_index = gid_index;
     ep->psn       = RDMA_DEFAULT_PSN;
 
-    /* 查询本地 GID */
+    /* Query local GID */
     if (ibv_query_gid(ctx, port, gid_index, &ep->gid) != 0) {
-        fprintf(stderr, "[fill_local_endpoint] 查询 GID[%d] 失败\n", gid_index);
-        /* 非致命错误: IB 模式下 GID 可能不需要 */
+        fprintf(stderr, "[fill_local_endpoint] Failed to query GID[%d]\n", gid_index);
+        /* Non-fatal error: GID may not be needed in IB mode */
     }
 
     return 0;

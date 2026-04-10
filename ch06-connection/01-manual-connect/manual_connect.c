@@ -1,23 +1,23 @@
 /**
- * 手动 TCP 交换建连示例 —— RDMA RC 模式双进程连接
+ * Manual TCP Exchange Connection Example -- RDMA RC Mode Dual-Process Connection
  *
- * 功能：
- *   - 服务器/客户端双模式，通过命令行参数选择
- *   - 自动检测 InfiniBand / RoCE 传输类型
- *   - 通过 TCP Socket 交换 RDMA 端点信息 (QPN, LID, GID, PSN)
- *   - 使用 qp_full_connect() 完成 QP 状态转换 (RESET → INIT → RTR → RTS)
- *   - 建连后执行双向 Send/Recv 测试验证连接
+ * Features:
+ *   - Server/client dual mode, selected via command-line arguments
+ *   - Auto-detects InfiniBand / RoCE transport type
+ *   - Exchanges RDMA endpoint info (QPN, LID, GID, PSN) via TCP Socket
+ *   - Uses qp_full_connect() to complete QP state transitions (RESET → INIT → RTR → RTS)
+ *   - Performs bidirectional Send/Recv test after connection to verify
  *
- * 用法：
- *   服务器: ./manual_connect -s [tcp_port]
- *   客户端: ./manual_connect -c <server_ip> [tcp_port]
+ * Usage:
+ *   Server: ./manual_connect -s [tcp_port]
+ *   Client: ./manual_connect -c <server_ip> [tcp_port]
  *
- * 编译：
+ * Build:
  *   gcc -o manual_connect manual_connect.c -I../../common ../../common/librdma_utils.a -libverbs
  *
- * 运行示例：
- *   终端1: ./manual_connect -s 7471
- *   终端2: ./manual_connect -c 192.168.1.100 7471
+ * Run example:
+ *   Terminal 1: ./manual_connect -s 7471
+ *   Terminal 2: ./manual_connect -c 192.168.1.100 7471
  */
 
 #include <stdio.h>
@@ -29,50 +29,50 @@
 #include <infiniband/verbs.h>
 #include "rdma_utils.h"
 
-/* ========== 常量定义 ========== */
+/* ========== Constant Definitions ========== */
 
-#define BUFFER_SIZE     1024            /* 发送/接收缓冲区大小 */
-#define DEFAULT_PORT    7471            /* 默认 TCP 端口 */
-#define IB_PORT         1               /* RDMA 端口号 */
-#define GID_INDEX       0               /* GID 表索引 (RoCE v2 通常用 1 或 3) */
-#define CQ_DEPTH        16              /* CQ 深度 */
-#define MAX_WR          16              /* QP 最大 WR 数 */
+#define BUFFER_SIZE     1024            /* Send/receive buffer size */
+#define DEFAULT_PORT    7471            /* Default TCP port */
+#define IB_PORT         1               /* RDMA port number */
+#define GID_INDEX       0               /* GID table index (RoCE v2 typically uses 1 or 3) */
+#define CQ_DEPTH        16              /* CQ depth */
+#define MAX_WR          16              /* QP maximum WR count */
 
-/* 服务器发送的消息 */
+/* Message sent by server */
 #define SERVER_MSG      "Hello from server!"
-/* 客户端发送的消息 */
+/* Message sent by client */
 #define CLIENT_MSG      "Hello from client!"
 
-/* ========== RDMA 资源结构体 ========== */
+/* ========== RDMA Resource Structure ========== */
 
 struct rdma_context {
-    /* 设备与保护域 */
-    struct ibv_context      *ctx;           /* 设备上下文 */
-    struct ibv_pd           *pd;            /* 保护域 */
-    struct ibv_cq           *cq;            /* 完成队列 */
-    struct ibv_qp           *qp;            /* 队列对 (RC 类型) */
+    /* Device and protection domain */
+    struct ibv_context      *ctx;           /* Device context */
+    struct ibv_pd           *pd;            /* Protection domain */
+    struct ibv_cq           *cq;            /* Completion queue */
+    struct ibv_qp           *qp;            /* Queue pair (RC type) */
 
-    /* 内存区域 */
-    struct ibv_mr           *send_mr;       /* 发送缓冲区 MR */
-    struct ibv_mr           *recv_mr;       /* 接收缓冲区 MR */
-    char                    *send_buf;      /* 发送缓冲区 */
-    char                    *recv_buf;      /* 接收缓冲区 */
+    /* Memory regions */
+    struct ibv_mr           *send_mr;       /* Send buffer MR */
+    struct ibv_mr           *recv_mr;       /* Receive buffer MR */
+    char                    *send_buf;      /* Send buffer */
+    char                    *recv_buf;      /* Receive buffer */
 
-    /* 连接信息 */
-    struct rdma_endpoint    local_ep;       /* 本地端点信息 */
-    struct rdma_endpoint    remote_ep;      /* 远端端点信息 */
+    /* Connection info */
+    struct rdma_endpoint    local_ep;       /* Local endpoint info */
+    struct rdma_endpoint    remote_ep;      /* Remote endpoint info */
 
-    /* 传输层类型 */
+    /* Transport layer type */
     enum rdma_transport     transport;      /* IB / RoCE */
-    int                     is_roce;        /* 是否为 RoCE 模式 */
+    int                     is_roce;        /* Whether in RoCE mode */
 
-    /* 运行参数 */
-    int                     is_server;      /* 是否为服务器模式 */
-    const char              *server_ip;     /* 服务器 IP (客户端模式) */
-    int                     tcp_port;       /* TCP 端口号 */
+    /* Runtime parameters */
+    int                     is_server;      /* Whether in server mode */
+    const char              *server_ip;     /* Server IP (client mode) */
+    int                     tcp_port;       /* TCP port number */
 };
 
-/* ========== 函数声明 ========== */
+/* ========== Function Declarations ========== */
 
 static void print_usage(const char *prog);
 static int  parse_args(struct rdma_context *rctx, int argc, char *argv[]);
@@ -83,7 +83,7 @@ static void cleanup_rdma_resources(struct rdma_context *rctx);
 static void print_endpoint(const char *label, const struct rdma_endpoint *ep,
                            int is_roce);
 
-/* ========== 主函数 ========== */
+/* ========== Main Function ========== */
 
 int main(int argc, char *argv[])
 {
@@ -93,44 +93,44 @@ int main(int argc, char *argv[])
     memset(&rctx, 0, sizeof(rctx));
     rctx.tcp_port = DEFAULT_PORT;
 
-    /* 第一步：解析命令行参数 */
+    /* Step 1: Parse command-line arguments */
     if (parse_args(&rctx, argc, argv) != 0) {
         print_usage(argv[0]);
         return 1;
     }
 
     printf("========================================\n");
-    printf("  RDMA 手动建连示例 (RC Send/Recv)\n");
-    printf("  模式: %s\n", rctx.is_server ? "服务器" : "客户端");
-    printf("  TCP 端口: %d\n", rctx.tcp_port);
+    printf("  RDMA Manual Connection Example (RC Send/Recv)\n");
+    printf("  Mode: %s\n", rctx.is_server ? "Server" : "Client");
+    printf("  TCP Port: %d\n", rctx.tcp_port);
     printf("========================================\n\n");
 
-    /* 第二步：初始化 RDMA 资源 */
-    printf("[步骤 1] 初始化 RDMA 资源...\n");
+    /* Step 2: Initialize RDMA resources */
+    printf("[Step 1] Initializing RDMA resources...\n");
     if (init_rdma_resources(&rctx) != 0) {
-        fprintf(stderr, "[错误] RDMA 资源初始化失败\n");
+        fprintf(stderr, "[Error] RDMA resource initialization failed\n");
         goto cleanup;
     }
-    printf("[步骤 1] RDMA 资源初始化完成 ✓\n\n");
+    printf("[Step 1] RDMA resource initialization complete ✓\n\n");
 
-    /* 第三步：交换端点信息并建立连接 */
-    printf("[步骤 2] 交换端点信息并建立 QP 连接...\n");
+    /* Step 3: Exchange endpoint info and establish connection */
+    printf("[Step 2] Exchanging endpoint info and establishing QP connection...\n");
     if (exchange_and_connect(&rctx) != 0) {
-        fprintf(stderr, "[错误] QP 连接建立失败\n");
+        fprintf(stderr, "[Error] QP connection establishment failed\n");
         goto cleanup;
     }
-    printf("[步骤 2] QP 连接建立完成 ✓\n\n");
+    printf("[Step 2] QP connection established ✓\n\n");
 
-    /* 第四步：执行双向 Send/Recv 测试 */
-    printf("[步骤 3] 执行双向 Send/Recv 通信测试...\n");
+    /* Step 4: Perform bidirectional Send/Recv test */
+    printf("[Step 3] Performing bidirectional Send/Recv communication test...\n");
     if (do_send_recv_test(&rctx) != 0) {
-        fprintf(stderr, "[错误] Send/Recv 测试失败\n");
+        fprintf(stderr, "[Error] Send/Recv test failed\n");
         goto cleanup;
     }
-    printf("[步骤 3] 通信测试完成 ✓\n\n");
+    printf("[Step 3] Communication test complete ✓\n\n");
 
     printf("========================================\n");
-    printf("  全部测试通过！RDMA 连接工作正常。\n");
+    printf("  All tests passed! RDMA connection works correctly.\n");
     printf("========================================\n");
     ret = 0;
 
@@ -139,24 +139,24 @@ cleanup:
     return ret;
 }
 
-/* ========== 打印用法 ========== */
+/* ========== Print Usage ========== */
 
 static void print_usage(const char *prog)
 {
-    fprintf(stderr, "\n用法:\n");
-    fprintf(stderr, "  服务器: %s -s [tcp_port]\n", prog);
-    fprintf(stderr, "  客户端: %s -c <server_ip> [tcp_port]\n", prog);
-    fprintf(stderr, "\n参数:\n");
-    fprintf(stderr, "  -s           服务器模式 (监听等待连接)\n");
-    fprintf(stderr, "  -c <ip>      客户端模式 (连接到指定服务器)\n");
-    fprintf(stderr, "  tcp_port     TCP 端口号 (默认: %d)\n", DEFAULT_PORT);
-    fprintf(stderr, "\n示例:\n");
+    fprintf(stderr, "\nUsage:\n");
+    fprintf(stderr, "  Server: %s -s [tcp_port]\n", prog);
+    fprintf(stderr, "  Client: %s -c <server_ip> [tcp_port]\n", prog);
+    fprintf(stderr, "\nArguments:\n");
+    fprintf(stderr, "  -s           Server mode (listen and wait for connection)\n");
+    fprintf(stderr, "  -c <ip>      Client mode (connect to specified server)\n");
+    fprintf(stderr, "  tcp_port     TCP port number (default: %d)\n", DEFAULT_PORT);
+    fprintf(stderr, "\nExamples:\n");
     fprintf(stderr, "  %s -s 7471\n", prog);
     fprintf(stderr, "  %s -c 192.168.1.100 7471\n", prog);
     fprintf(stderr, "\n");
 }
 
-/* ========== 解析命令行参数 ========== */
+/* ========== Parse Command-Line Arguments ========== */
 
 static int parse_args(struct rdma_context *rctx, int argc, char *argv[])
 {
@@ -164,24 +164,24 @@ static int parse_args(struct rdma_context *rctx, int argc, char *argv[])
         return -1;
     }
 
-    /* 解析 -s (服务器) 或 -c (客户端) 模式 */
+    /* Parse -s (server) or -c (client) mode */
     if (strcmp(argv[1], "-s") == 0) {
-        /* 服务器模式 */
+        /* Server mode */
         rctx->is_server = 1;
         rctx->server_ip = NULL;
-        /* 可选: TCP 端口 */
+        /* Optional: TCP port */
         if (argc >= 3) {
             rctx->tcp_port = atoi(argv[2]);
         }
     } else if (strcmp(argv[1], "-c") == 0) {
-        /* 客户端模式: 需要服务器 IP */
+        /* Client mode: server IP required */
         if (argc < 3) {
-            fprintf(stderr, "[错误] 客户端模式需要指定服务器 IP\n");
+            fprintf(stderr, "[Error] Client mode requires server IP\n");
             return -1;
         }
         rctx->is_server = 0;
         rctx->server_ip = argv[2];
-        /* 可选: TCP 端口 */
+        /* Optional: TCP port */
         if (argc >= 4) {
             rctx->tcp_port = atoi(argv[3]);
         }
@@ -192,7 +192,7 @@ static int parse_args(struct rdma_context *rctx, int argc, char *argv[])
     return 0;
 }
 
-/* ========== 初始化 RDMA 资源 ========== */
+/* ========== Initialize RDMA Resources ========== */
 
 static int init_rdma_resources(struct rdma_context *rctx)
 {
@@ -201,33 +201,33 @@ static int init_rdma_resources(struct rdma_context *rctx)
     int num_devices;
     int ret = -1;
 
-    /* 1. 获取设备列表并打开第一个设备 */
+    /* 1. Get device list and open the first device */
     dev_list = ibv_get_device_list(&num_devices);
-    CHECK_NULL(dev_list, "获取 RDMA 设备列表失败");
+    CHECK_NULL(dev_list, "Failed to get RDMA device list");
     if (num_devices == 0) {
-        fprintf(stderr, "[错误] 未发现 RDMA 设备\n");
+        fprintf(stderr, "[Error] No RDMA devices found\n");
         goto cleanup;
     }
-    printf("  发现 %d 个 RDMA 设备, 使用: %s\n",
+    printf("  Found %d RDMA device(s), using: %s\n",
            num_devices, ibv_get_device_name(dev_list[0]));
 
     rctx->ctx = ibv_open_device(dev_list[0]);
-    CHECK_NULL(rctx->ctx, "打开 RDMA 设备失败");
+    CHECK_NULL(rctx->ctx, "Failed to open RDMA device");
 
-    /* 2. 检测传输层类型 (IB / RoCE) */
+    /* 2. Detect transport layer type (IB / RoCE) */
     rctx->transport = detect_transport(rctx->ctx, IB_PORT);
     rctx->is_roce = (rctx->transport == RDMA_TRANSPORT_ROCE);
-    printf("  传输类型: %s\n", transport_str(rctx->transport));
+    printf("  Transport type: %s\n", transport_str(rctx->transport));
 
-    /* 3. 分配保护域 (PD) */
+    /* 3. Allocate protection domain (PD) */
     rctx->pd = ibv_alloc_pd(rctx->ctx);
-    CHECK_NULL(rctx->pd, "分配保护域 (PD) 失败");
+    CHECK_NULL(rctx->pd, "Failed to allocate protection domain (PD)");
 
-    /* 4. 创建完成队列 (CQ) */
+    /* 4. Create completion queue (CQ) */
     rctx->cq = ibv_create_cq(rctx->ctx, CQ_DEPTH, NULL, NULL, 0);
-    CHECK_NULL(rctx->cq, "创建完成队列 (CQ) 失败");
+    CHECK_NULL(rctx->cq, "Failed to create completion queue (CQ)");
 
-    /* 5. 创建 RC 类型的队列对 (QP) */
+    /* 5. Create RC type queue pair (QP) */
     memset(&qp_init_attr, 0, sizeof(qp_init_attr));
     qp_init_attr.send_cq  = rctx->cq;
     qp_init_attr.recv_cq  = rctx->cq;
@@ -238,31 +238,31 @@ static int init_rdma_resources(struct rdma_context *rctx)
     qp_init_attr.cap.max_recv_sge = 1;
 
     rctx->qp = ibv_create_qp(rctx->pd, &qp_init_attr);
-    CHECK_NULL(rctx->qp, "创建队列对 (QP) 失败");
-    printf("  QP 编号: %u (类型: RC)\n", rctx->qp->qp_num);
+    CHECK_NULL(rctx->qp, "Failed to create queue pair (QP)");
+    printf("  QP number: %u (type: RC)\n", rctx->qp->qp_num);
 
-    /* 打印初始 QP 状态 (应为 RESET) */
+    /* Print initial QP state (should be RESET) */
     print_qp_state(rctx->qp);
 
-    /* 6. 分配并注册发送缓冲区 */
+    /* 6. Allocate and register send buffer */
     rctx->send_buf = (char *)malloc(BUFFER_SIZE);
-    CHECK_NULL(rctx->send_buf, "分配发送缓冲区失败");
+    CHECK_NULL(rctx->send_buf, "Failed to allocate send buffer");
     memset(rctx->send_buf, 0, BUFFER_SIZE);
 
     rctx->send_mr = ibv_reg_mr(rctx->pd, rctx->send_buf, BUFFER_SIZE,
                                 IBV_ACCESS_LOCAL_WRITE);
-    CHECK_NULL(rctx->send_mr, "注册发送 MR 失败");
+    CHECK_NULL(rctx->send_mr, "Failed to register send MR");
 
-    /* 7. 分配并注册接收缓冲区 */
+    /* 7. Allocate and register receive buffer */
     rctx->recv_buf = (char *)malloc(BUFFER_SIZE);
-    CHECK_NULL(rctx->recv_buf, "分配接收缓冲区失败");
+    CHECK_NULL(rctx->recv_buf, "Failed to allocate receive buffer");
     memset(rctx->recv_buf, 0, BUFFER_SIZE);
 
     rctx->recv_mr = ibv_reg_mr(rctx->pd, rctx->recv_buf, BUFFER_SIZE,
                                 IBV_ACCESS_LOCAL_WRITE);
-    CHECK_NULL(rctx->recv_mr, "注册接收 MR 失败");
+    CHECK_NULL(rctx->recv_mr, "Failed to register receive MR");
 
-    printf("  MR 注册完成: send_lkey=0x%x, recv_lkey=0x%x\n",
+    printf("  MR registration complete: send_lkey=0x%x, recv_lkey=0x%x\n",
            rctx->send_mr->lkey, rctx->recv_mr->lkey);
 
     ret = 0;
@@ -274,7 +274,7 @@ cleanup:
     return ret;
 }
 
-/* ========== 打印端点信息 ========== */
+/* ========== Print Endpoint Info ========== */
 
 static void print_endpoint(const char *label, const struct rdma_endpoint *ep,
                            int is_roce)
@@ -282,68 +282,68 @@ static void print_endpoint(const char *label, const struct rdma_endpoint *ep,
     char gid_str[46];
     gid_to_str(&ep->gid, gid_str, sizeof(gid_str));
 
-    printf("  %s 端点信息:\n", label);
-    printf("    QP 编号 (qp_num): %u\n", ep->qp_num);
-    printf("    端口号 (port):    %u\n", ep->port_num);
-    printf("    PSN:              %u\n", ep->psn);
+    printf("  %s endpoint info:\n", label);
+    printf("    QP number (qp_num): %u\n", ep->qp_num);
+    printf("    Port (port):        %u\n", ep->port_num);
+    printf("    PSN:                %u\n", ep->psn);
     if (is_roce) {
-        printf("    GID 索引:         %u\n", ep->gid_index);
-        printf("    GID:              %s\n", gid_str);
+        printf("    GID index:          %u\n", ep->gid_index);
+        printf("    GID:                %s\n", gid_str);
     } else {
-        printf("    LID:              %u\n", ep->lid);
+        printf("    LID:                %u\n", ep->lid);
     }
 }
 
-/* ========== 交换端点信息并建立 QP 连接 ========== */
+/* ========== Exchange Endpoint Info and Establish QP Connection ========== */
 
 static int exchange_and_connect(struct rdma_context *rctx)
 {
     int ret;
 
-    /* 1. 填充本地端点信息 (QPN, LID, GID, PSN 等) */
+    /* 1. Fill local endpoint info (QPN, LID, GID, PSN, etc.) */
     ret = fill_local_endpoint(rctx->ctx, rctx->qp, IB_PORT,
                               GID_INDEX, &rctx->local_ep);
-    CHECK_ERRNO(ret, "填充本地端点信息失败");
+    CHECK_ERRNO(ret, "Failed to fill local endpoint info");
 
     printf("\n");
-    print_endpoint("本地", &rctx->local_ep, rctx->is_roce);
+    print_endpoint("Local", &rctx->local_ep, rctx->is_roce);
 
-    /* 2. 通过 TCP Socket 交换端点信息 */
-    printf("\n  通过 TCP 交换端点信息...\n");
+    /* 2. Exchange endpoint info via TCP Socket */
+    printf("\n  Exchanging endpoint info via TCP...\n");
     /*
      * exchange_endpoint_tcp():
-     *   server_ip = NULL → 服务器模式 (监听)
-     *   server_ip = "x.x.x.x" → 客户端模式 (连接)
+     *   server_ip = NULL → Server mode (listen)
+     *   server_ip = "x.x.x.x" → Client mode (connect)
      */
     ret = exchange_endpoint_tcp(rctx->server_ip, rctx->tcp_port,
                                 &rctx->local_ep, &rctx->remote_ep);
-    CHECK_ERRNO(ret, "TCP 端点信息交换失败");
+    CHECK_ERRNO(ret, "TCP endpoint info exchange failed");
 
     printf("\n");
-    print_endpoint("远端", &rctx->remote_ep, rctx->is_roce);
+    print_endpoint("Remote", &rctx->remote_ep, rctx->is_roce);
 
-    /* 3. 使用 qp_full_connect() 完成 QP 状态转换 */
+    /* 3. Use qp_full_connect() to complete QP state transitions */
     /*
-     * qp_full_connect() 内部执行:
-     *   RESET → INIT (设置端口和访问权限)
-     *   INIT  → RTR  (设置对端地址，准备接收)
-     *   RTR   → RTS  (准备发送)
+     * qp_full_connect() internally performs:
+     *   RESET → INIT (set port and access permissions)
+     *   INIT  → RTR  (set remote address, ready to receive)
+     *   RTR   → RTS  (ready to send)
      *
-     * 对于 IB 模式: 使用 LID 寻址
-     * 对于 RoCE 模式: 使用 GID 寻址 (is_global=1)
+     * For IB mode: uses LID addressing
+     * For RoCE mode: uses GID addressing (is_global=1)
      */
-    printf("\n  执行 QP 状态转换 (RESET → INIT → RTR → RTS)...\n");
+    printf("\n  Performing QP state transitions (RESET → INIT → RTR → RTS)...\n");
     int access_flags = IBV_ACCESS_LOCAL_WRITE |
                        IBV_ACCESS_REMOTE_READ |
                        IBV_ACCESS_REMOTE_WRITE;
 
     ret = qp_full_connect(rctx->qp, &rctx->remote_ep,
                           IB_PORT, rctx->is_roce, access_flags);
-    CHECK_ERRNO(ret, "QP 连接失败 (qp_full_connect)");
+    CHECK_ERRNO(ret, "QP connection failed (qp_full_connect)");
 
-    /* 打印最终 QP 状态 (应为 RTS) */
+    /* Print final QP state (should be RTS) */
     print_qp_state(rctx->qp);
-    printf("  QP 连接建立成功! 传输类型: %s\n", transport_str(rctx->transport));
+    printf("  QP connection established successfully! Transport type: %s\n", transport_str(rctx->transport));
 
     return 0;
 
@@ -351,7 +351,7 @@ cleanup:
     return -1;
 }
 
-/* ========== 执行双向 Send/Recv 测试 ========== */
+/* ========== Perform Bidirectional Send/Recv Test ========== */
 
 static int do_send_recv_test(struct rdma_context *rctx)
 {
@@ -362,66 +362,66 @@ static int do_send_recv_test(struct rdma_context *rctx)
     int ret;
 
     /*
-     * 通信流程:
-     *   1. 两端都先 Post Recv (准备接收)
-     *   2. 服务器发送 "Hello from server!"
-     *   3. 客户端发送 "Hello from client!"
-     *   4. 两端都 Poll CQ 获取 Send 完成和 Recv 完成
+     * Communication flow:
+     *   1. Both ends first Post Recv (prepare to receive)
+     *   2. Server sends "Hello from server!"
+     *   3. Client sends "Hello from client!"
+     *   4. Both ends Poll CQ to get Send and Recv completions
      */
 
-    /* ---- 第一步: Post Recv (准备接收对方的消息) ---- */
+    /* ---- Step 1: Post Recv (prepare to receive peer's message) ---- */
     memset(&sge, 0, sizeof(sge));
     sge.addr   = (uint64_t)rctx->recv_buf;
     sge.length = BUFFER_SIZE;
     sge.lkey   = rctx->recv_mr->lkey;
 
     memset(&recv_wr, 0, sizeof(recv_wr));
-    recv_wr.wr_id   = 1;       /* 用 wr_id=1 标识 Recv */
+    recv_wr.wr_id   = 1;       /* Use wr_id=1 to identify Recv */
     recv_wr.sg_list = &sge;
     recv_wr.num_sge = 1;
 
     ret = ibv_post_recv(rctx->qp, &recv_wr, &bad_recv_wr);
-    CHECK_ERRNO(ret, "Post Recv 失败");
-    printf("  Post Recv 完成 (等待对方消息)\n");
+    CHECK_ERRNO(ret, "Post Recv failed");
+    printf("  Post Recv complete (waiting for peer's message)\n");
 
-    /* ---- 第二步: 准备发送消息 ---- */
+    /* ---- Step 2: Prepare send message ---- */
     const char *msg = rctx->is_server ? SERVER_MSG : CLIENT_MSG;
     strncpy(rctx->send_buf, msg, BUFFER_SIZE - 1);
 
     memset(&sge, 0, sizeof(sge));
     sge.addr   = (uint64_t)rctx->send_buf;
-    sge.length = (uint32_t)(strlen(msg) + 1);  /* 包含 '\0' */
+    sge.length = (uint32_t)(strlen(msg) + 1);  /* Including '\0' */
     sge.lkey   = rctx->send_mr->lkey;
 
     memset(&send_wr, 0, sizeof(send_wr));
-    send_wr.wr_id      = 2;    /* 用 wr_id=2 标识 Send */
+    send_wr.wr_id      = 2;    /* Use wr_id=2 to identify Send */
     send_wr.sg_list    = &sge;
     send_wr.num_sge    = 1;
     send_wr.opcode     = IBV_WR_SEND;
-    send_wr.send_flags = IBV_SEND_SIGNALED;     /* 请求完成通知 */
+    send_wr.send_flags = IBV_SEND_SIGNALED;     /* Request completion notification */
 
-    /* ---- 第三步: Post Send ---- */
+    /* ---- Step 3: Post Send ---- */
     ret = ibv_post_send(rctx->qp, &send_wr, &bad_send_wr);
-    CHECK_ERRNO(ret, "Post Send 失败");
-    printf("  Post Send 完成 (发送: \"%s\")\n", msg);
+    CHECK_ERRNO(ret, "Post Send failed");
+    printf("  Post Send complete (sent: \"%s\")\n", msg);
 
-    /* ---- 第四步: Poll CQ 等待 Send 完成 ---- */
-    printf("\n  等待 Send 完成...\n");
+    /* ---- Step 4: Poll CQ waiting for Send completion ---- */
+    printf("\n  Waiting for Send completion...\n");
     ret = poll_cq_blocking(rctx->cq, &wc);
-    CHECK_ERRNO(ret, "Poll CQ (Send) 失败");
-    printf("  Send 完成:\n");
+    CHECK_ERRNO(ret, "Poll CQ (Send) failed");
+    printf("  Send complete:\n");
     print_wc_detail(&wc);
 
-    /* ---- 第五步: Poll CQ 等待 Recv 完成 ---- */
-    printf("  等待 Recv 完成...\n");
+    /* ---- Step 5: Poll CQ waiting for Recv completion ---- */
+    printf("  Waiting for Recv completion...\n");
     ret = poll_cq_blocking(rctx->cq, &wc);
-    CHECK_ERRNO(ret, "Poll CQ (Recv) 失败");
-    printf("  Recv 完成:\n");
+    CHECK_ERRNO(ret, "Poll CQ (Recv) failed");
+    printf("  Recv complete:\n");
     print_wc_detail(&wc);
 
-    /* ---- 第六步: 打印接收到的消息 ---- */
+    /* ---- Step 6: Print received message ---- */
     printf("  ╔══════════════════════════════════════════╗\n");
-    printf("  ║  收到消息: \"%s\"\n", rctx->recv_buf);
+    printf("  ║  Received message: \"%s\"\n", rctx->recv_buf);
     printf("  ╚══════════════════════════════════════════╝\n");
 
     return 0;
@@ -430,13 +430,13 @@ cleanup:
     return -1;
 }
 
-/* ========== 清理 RDMA 资源 ========== */
+/* ========== Cleanup RDMA Resources ========== */
 
 static void cleanup_rdma_resources(struct rdma_context *rctx)
 {
-    printf("\n[清理] 释放 RDMA 资源...\n");
+    printf("\n[Cleanup] Releasing RDMA resources...\n");
 
-    /* 按创建的逆序释放资源 */
+    /* Release resources in reverse order of creation */
     if (rctx->recv_mr)  { ibv_dereg_mr(rctx->recv_mr);    rctx->recv_mr = NULL; }
     if (rctx->send_mr)  { ibv_dereg_mr(rctx->send_mr);    rctx->send_mr = NULL; }
     if (rctx->recv_buf) { free(rctx->recv_buf);            rctx->recv_buf = NULL; }
@@ -446,5 +446,5 @@ static void cleanup_rdma_resources(struct rdma_context *rctx)
     if (rctx->pd)       { ibv_dealloc_pd(rctx->pd);       rctx->pd = NULL; }
     if (rctx->ctx)      { ibv_close_device(rctx->ctx);    rctx->ctx = NULL; }
 
-    printf("[清理] 完成\n");
+    printf("[Cleanup] Done\n");
 }

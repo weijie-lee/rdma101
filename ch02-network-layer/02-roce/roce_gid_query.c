@@ -1,26 +1,26 @@
 /**
- * roce_gid_query.c - RoCE GID 表枚举与分析程序
+ * roce_gid_query.c - RoCE GID Table Enumeration and Analysis Program
  *
- * 功能：
- *   - 枚举所有设备的所有端口的 GID 条目
- *   - 自动检测 IB vs RoCE (link_layer == ETHERNET → RoCE)
- *   - 格式化打印每个 GID
- *   - 分析 GID 类型 (link-local / IPv4-mapped / IPv6)
- *   - 建议 RoCE v2 应使用的 GID 索引
- *   - 解释 ah_attr 在 IB 和 RoCE 下的差异
+ * Features:
+ *   - Enumerate all GID entries for all ports of all devices
+ *   - Automatically detect IB vs RoCE (link_layer == ETHERNET -> RoCE)
+ *   - Format and print each GID
+ *   - Analyze GID type (link-local / IPv4-mapped / IPv6)
+ *   - Recommend GID index to use for RoCE v2
+ *   - Explain ah_attr differences between IB and RoCE
  *
- * 编译:
+ * Compile:
  *   gcc -o roce_gid_query roce_gid_query.c -I../../common \
  *       ../../common/librdma_utils.a -libverbs
  *
- * 或使用 Makefile:
+ * Or use Makefile:
  *   make
  *
- * 预期输出:
- *   ===== 设备: rxe_0 =====
- *   端口 1: link_layer=ETHERNET (RoCE 模式)
+ * Expected Output:
+ *   ===== Device: rxe_0 =====
+ *   Port 1: link_layer=ETHERNET (RoCE mode)
  *     GID[0] = fe80:0000:0000:0000:xxxx:xxxx:xxxx:xxxx  [link-local]
- *     GID[1] = 0000:0000:0000:0000:0000:ffff:0a00:0001  [IPv4-mapped] ← 推荐
+ *     GID[1] = 0000:0000:0000:0000:0000:ffff:0a00:0001  [IPv4-mapped] <- Recommended
  *   ...
  */
 
@@ -31,24 +31,24 @@
 #include <arpa/inet.h>
 #include <infiniband/verbs.h>
 
-/* 引入公共工具库 */
+/* Include common utility library */
 #include "rdma_utils.h"
 
-/* ========== GID 分析辅助函数 ========== */
+/* ========== GID Analysis Helper Functions ========== */
 
 /**
- * gid_type_str - 分析 GID 类型并返回描述字符串
+ * gid_type_str - Analyze GID type and return description string
  *
- * GID 类型判断规则：
- *   - 前缀 fe80:: → link-local (通常对应 RoCE v1)
- *   - 前缀 ::ffff:x.x.x.x → IPv4-mapped IPv6 (对应 RoCE v2)
- *   - 全零 → 空/无效
- *   - 其他 → 常规 IPv6 全局地址
+ * GID type detection rules:
+ *   - Prefix fe80:: -> link-local (typically corresponds to RoCE v1)
+ *   - Prefix ::ffff:x.x.x.x -> IPv4-mapped IPv6 (corresponds to RoCE v2)
+ *   - All zeros -> empty/invalid
+ *   - Other -> regular IPv6 global address
  */
 static const char *gid_type_str(const union ibv_gid *gid)
 {
-    /* 检查是否全零 */
-    int all_zero = 1;              /* 是否全零标志 */
+    /* Check if all zeros */
+    int all_zero = 1;              /* All-zero flag */
     for (int i = 0; i < 16; i++) {
         if (gid->raw[i] != 0) {
             all_zero = 0;
@@ -56,18 +56,18 @@ static const char *gid_type_str(const union ibv_gid *gid)
         }
     }
     if (all_zero)
-        return "空 (全零)";
+        return "Empty (all zeros)";
 
-    /* 检查 link-local 前缀: fe80:0000:0000:0000:... */
+    /* Check link-local prefix: fe80:0000:0000:0000:... */
     if (gid->raw[0] == 0xfe && gid->raw[1] == 0x80 &&
         gid->raw[2] == 0x00 && gid->raw[3] == 0x00 &&
         gid->raw[4] == 0x00 && gid->raw[5] == 0x00 &&
         gid->raw[6] == 0x00 && gid->raw[7] == 0x00)
         return "link-local (RoCE v1)";
 
-    /* 检查 IPv4-mapped 前缀: ::ffff:x.x.x.x */
-    /* 即前 10 字节全零，第 11-12 字节为 0xffff */
-    int prefix_zero = 1;          /* 前 10 字节是否全零 */
+    /* Check IPv4-mapped prefix: ::ffff:x.x.x.x */
+    /* i.e. first 10 bytes all zeros, bytes 11-12 are 0xffff */
+    int prefix_zero = 1;          /* Whether first 10 bytes are all zeros */
     for (int i = 0; i < 10; i++) {
         if (gid->raw[i] != 0) {
             prefix_zero = 0;
@@ -75,18 +75,18 @@ static const char *gid_type_str(const union ibv_gid *gid)
         }
     }
     if (prefix_zero && gid->raw[10] == 0xff && gid->raw[11] == 0xff)
-        return "IPv4-mapped (RoCE v2) ★推荐";
+        return "IPv4-mapped (RoCE v2) *Recommended";
 
-    /* 其他 IPv6 全局地址 */
-    return "IPv6 全局地址";
+    /* Other IPv6 global address */
+    return "IPv6 global address";
 }
 
 /**
- * print_gid_ipv4 - 如果 GID 是 IPv4-mapped，提取并打印 IPv4 地址
+ * print_gid_ipv4 - If GID is IPv4-mapped, extract and print the IPv4 address
  */
 static void print_gid_ipv4(const union ibv_gid *gid)
 {
-    /* 检查是否 IPv4-mapped */
+    /* Check if IPv4-mapped */
     int prefix_zero = 1;
     for (int i = 0; i < 10; i++) {
         if (gid->raw[i] != 0) {
@@ -96,7 +96,7 @@ static void print_gid_ipv4(const union ibv_gid *gid)
     }
 
     if (prefix_zero && gid->raw[10] == 0xff && gid->raw[11] == 0xff) {
-        /* 提取后 4 字节作为 IPv4 地址 */
+        /* Extract last 4 bytes as IPv4 address */
         printf("  (IPv4: %d.%d.%d.%d)",
                gid->raw[12], gid->raw[13],
                gid->raw[14], gid->raw[15]);
@@ -104,138 +104,138 @@ static void print_gid_ipv4(const union ibv_gid *gid)
 }
 
 /**
- * print_ah_attr_guide - 打印 IB 和 RoCE 模式下 ah_attr 设置的差异说明
+ * print_ah_attr_guide - Print ah_attr setup difference guide for IB and RoCE modes
  */
 static void print_ah_attr_guide(void)
 {
     printf("\n");
     printf("================================================================\n");
-    printf("  ah_attr 寻址差异 (IB vs RoCE)\n");
+    printf("  ah_attr Addressing Differences (IB vs RoCE)\n");
     printf("================================================================\n");
     printf("\n");
-    printf("  InfiniBand (使用 LID 寻址):\n");
-    printf("  ┌─────────────────────────────────────────┐\n");
-    printf("  │ ah_attr.dlid      = remote->lid;        │  目的端口 LID\n");
-    printf("  │ ah_attr.sl        = 0;                  │  Service Level\n");
-    printf("  │ ah_attr.port_num  = port;               │  本地端口号\n");
-    printf("  │ ah_attr.is_global = 0;                  │  不需要 GRH\n");
-    printf("  └─────────────────────────────────────────┘\n");
+    printf("  InfiniBand (uses LID addressing):\n");
+    printf("  +---------------------------------------------+\n");
+    printf("  | ah_attr.dlid      = remote->lid;        |  Destination port LID\n");
+    printf("  | ah_attr.sl        = 0;                  |  Service Level\n");
+    printf("  | ah_attr.port_num  = port;               |  Local port number\n");
+    printf("  | ah_attr.is_global = 0;                  |  GRH not needed\n");
+    printf("  +---------------------------------------------+\n");
     printf("\n");
-    printf("  RoCE (使用 GID 寻址，必须设置 GRH):\n");
-    printf("  ┌─────────────────────────────────────────────────┐\n");
-    printf("  │ ah_attr.dlid           = 0;                     │  RoCE 不用 LID\n");
-    printf("  │ ah_attr.port_num       = port;                  │  本地端口号\n");
-    printf("  │ ah_attr.is_global      = 1;                     │  必须为 1!\n");
-    printf("  │ ah_attr.grh.dgid       = remote->gid;           │  目的 GID\n");
-    printf("  │ ah_attr.grh.sgid_index = local_gid_index;       │  本地 GID 索引\n");
-    printf("  │ ah_attr.grh.hop_limit  = 64;                    │  TTL\n");
-    printf("  └─────────────────────────────────────────────────┘\n");
+    printf("  RoCE (uses GID addressing, must set GRH):\n");
+    printf("  +-------------------------------------------------+\n");
+    printf("  | ah_attr.dlid           = 0;                     |  RoCE does not use LID\n");
+    printf("  | ah_attr.port_num       = port;                  |  Local port number\n");
+    printf("  | ah_attr.is_global      = 1;                     |  Must be 1!\n");
+    printf("  | ah_attr.grh.dgid       = remote->gid;           |  Destination GID\n");
+    printf("  | ah_attr.grh.sgid_index = local_gid_index;       |  Local GID index\n");
+    printf("  | ah_attr.grh.hop_limit  = 64;                    |  TTL\n");
+    printf("  +-------------------------------------------------+\n");
     printf("\n");
-    printf("  关键区别:\n");
-    printf("    - IB:   dlid 字段有效, is_global=0\n");
-    printf("    - RoCE: dlid 无意义, is_global 必须=1, grh.dgid 携带目标地址\n");
-    printf("    - RoCE v2 推荐使用 IPv4-mapped GID (类型标记为★推荐)\n");
+    printf("  Key Differences:\n");
+    printf("    - IB:   dlid field is valid, is_global=0\n");
+    printf("    - RoCE: dlid is meaningless, is_global must=1, grh.dgid carries target address\n");
+    printf("    - RoCE v2 recommends using IPv4-mapped GID (marked as *Recommended)\n");
     printf("\n");
 }
 
-/* ========== 主函数 ========== */
+/* ========== Main Function ========== */
 
 int main(int argc, char *argv[])
 {
-    struct ibv_device **dev_list = NULL;    /* 设备列表 */
-    int num_devices = 0;                    /* 设备数量 */
-    int ret = 0;                            /* 返回值 */
-    int recommended_gid_found __attribute__((unused)) = 0; /* 是否找到推荐的 GID */
+    struct ibv_device **dev_list = NULL;    /* Device list */
+    int num_devices = 0;                    /* Number of devices */
+    int ret = 0;                            /* Return value */
+    int recommended_gid_found __attribute__((unused)) = 0; /* Whether recommended GID was found */
 
     printf("==============================================\n");
-    printf("  RoCE GID 表枚举与分析工具\n");
-    printf("  自动检测 IB/RoCE，分析 GID 类型\n");
+    printf("  RoCE GID Table Enumeration and Analysis Tool\n");
+    printf("  Auto-detect IB/RoCE, analyze GID types\n");
     printf("==============================================\n");
 
-    /* 第一步：获取设备列表 */
+    /* Step 1: Get device list */
     dev_list = ibv_get_device_list(&num_devices);
     if (!dev_list) {
-        fprintf(stderr, "[错误] ibv_get_device_list() 失败: %s\n",
+        fprintf(stderr, "[Error] ibv_get_device_list() failed: %s\n",
                 strerror(errno));
         return 1;
     }
 
     if (num_devices == 0) {
-        fprintf(stderr, "[错误] 未找到 RDMA 设备\n");
+        fprintf(stderr, "[Error] No RDMA devices found\n");
         ret = 1;
         goto cleanup;
     }
 
-    printf("\n共发现 %d 个 RDMA 设备\n", num_devices);
+    printf("\nFound %d RDMA device(s)\n", num_devices);
 
-    /* 第二步：遍历每个设备 */
+    /* Step 2: Iterate over each device */
     for (int i = 0; i < num_devices; i++) {
         struct ibv_device *dev = dev_list[i];
-        struct ibv_context *ctx = NULL;             /* 设备上下文 */
-        struct ibv_device_attr dev_attr;            /* 设备属性 */
+        struct ibv_context *ctx = NULL;             /* Device context */
+        struct ibv_device_attr dev_attr;            /* Device attributes */
 
-        printf("\n===== 设备 %d: %s =====\n", i, ibv_get_device_name(dev));
+        printf("\n===== Device %d: %s =====\n", i, ibv_get_device_name(dev));
 
-        /* 打开设备 */
+        /* Open device */
         ctx = ibv_open_device(dev);
         if (!ctx) {
-            fprintf(stderr, "[错误] 无法打开设备 %s: %s\n",
+            fprintf(stderr, "[Error] Cannot open device %s: %s\n",
                     ibv_get_device_name(dev), strerror(errno));
             continue;
         }
 
-        /* 查询设备属性 (获取端口数量) */
+        /* Query device attributes (get port count) */
         memset(&dev_attr, 0, sizeof(dev_attr));
         ret = ibv_query_device(ctx, &dev_attr);
         if (ret) {
-            fprintf(stderr, "[错误] ibv_query_device() 失败\n");
+            fprintf(stderr, "[Error] ibv_query_device() failed\n");
             ibv_close_device(ctx);
             continue;
         }
 
-        /* 第三步：遍历每个端口 */
+        /* Step 3: Iterate over each port */
         for (uint8_t port = 1; port <= dev_attr.phys_port_cnt; port++) {
-            struct ibv_port_attr port_attr;         /* 端口属性 */
+            struct ibv_port_attr port_attr;         /* Port attributes */
 
             memset(&port_attr, 0, sizeof(port_attr));
             ret = ibv_query_port(ctx, port, &port_attr);
             if (ret) {
-                fprintf(stderr, "[错误] ibv_query_port(port=%u) 失败\n", port);
+                fprintf(stderr, "[Error] ibv_query_port(port=%u) failed\n", port);
                 continue;
             }
 
-            /* 判断链路层类型 */
+            /* Determine link layer type */
             int is_roce = (port_attr.link_layer == IBV_LINK_LAYER_ETHERNET);
 
-            printf("\n  端口 %u: link_layer=%s (%s 模式)\n",
+            printf("\n  Port %u: link_layer=%s (%s mode)\n",
                    port,
                    is_roce ? "ETHERNET" : "INFINIBAND",
                    is_roce ? "RoCE" : "IB");
 
             if (!is_roce) {
-                /* IB 模式：显示 LID 信息 */
+                /* IB mode: Display LID information */
                 printf("    LID = %u (0x%04x)\n", port_attr.lid, port_attr.lid);
                 printf("    SM_LID = %u\n", port_attr.sm_lid);
-                printf("    (IB 模式使用 LID 寻址，GID 表仅在跨子网时使用)\n");
+                printf("    (IB mode uses LID addressing, GID table is only used for cross-subnet)\n");
             }
 
-            /* 第四步：枚举 GID 表 */
-            printf("    GID 表 (共 %d 个条目):\n", port_attr.gid_tbl_len);
+            /* Step 4: Enumerate GID table */
+            printf("    GID Table (%d entries total):\n", port_attr.gid_tbl_len);
 
-            int valid_count = 0;               /* 有效 GID 计数 */
-            int recommended_index = -1;        /* 推荐的 GID 索引 */
+            int valid_count = 0;               /* Valid GID count */
+            int recommended_index = -1;        /* Recommended GID index */
 
             for (int gid_idx = 0; gid_idx < port_attr.gid_tbl_len; gid_idx++) {
-                union ibv_gid gid;              /* GID 值 */
+                union ibv_gid gid;              /* GID value */
 
-                /* 调用 ibv_query_gid() 获取指定索引的 GID */
+                /* Call ibv_query_gid() to get GID at specified index */
                 ret = ibv_query_gid(ctx, port, gid_idx, &gid);
                 if (ret) {
-                    /* 查询失败，跳过 */
+                    /* Query failed, skip */
                     continue;
                 }
 
-                /* 检查是否全零 (无效条目) */
+                /* Check if all zeros (invalid entry) */
                 int all_zero = 1;
                 for (int b = 0; b < 16; b++) {
                     if (gid.raw[b] != 0) {
@@ -244,23 +244,23 @@ int main(int argc, char *argv[])
                     }
                 }
                 if (all_zero)
-                    continue;   /* 跳过全零 GID */
+                    continue;   /* Skip all-zero GID */
 
                 valid_count++;
 
-                /* 格式化打印 GID */
-                char gid_str[46];              /* GID 字符串缓冲区 */
+                /* Format and print GID */
+                char gid_str[46];              /* GID string buffer */
                 gid_to_str(&gid, gid_str, sizeof(gid_str));
 
                 const char *type = gid_type_str(&gid);
                 printf("      GID[%2d] = %s  [%s]", gid_idx, gid_str, type);
 
-                /* 如果是 IPv4-mapped，显示对应的 IPv4 地址 */
+                /* If IPv4-mapped, show corresponding IPv4 address */
                 print_gid_ipv4(&gid);
 
                 printf("\n");
 
-                /* 记录第一个 IPv4-mapped GID 作为推荐索引 */
+                /* Record first IPv4-mapped GID as recommended index */
                 if (recommended_index < 0) {
                     int pz = 1;
                     for (int b = 0; b < 10; b++) {
@@ -273,23 +273,23 @@ int main(int argc, char *argv[])
                 }
             }
 
-            /* 总结 */
-            printf("\n    有效 GID 条目: %d / %d\n", valid_count, port_attr.gid_tbl_len);
+            /* Summary */
+            printf("\n    Valid GID entries: %d / %d\n", valid_count, port_attr.gid_tbl_len);
 
             if (is_roce && recommended_index >= 0) {
-                printf("    ★ RoCE v2 推荐 GID 索引: %d (IPv4-mapped)\n",
+                printf("    * RoCE v2 recommended GID index: %d (IPv4-mapped)\n",
                        recommended_index);
-                printf("      使用方法: gid_index = %d\n", recommended_index);
+                printf("      Usage: gid_index = %d\n", recommended_index);
             } else if (is_roce) {
-                printf("    ⚠ 未找到 IPv4-mapped GID，请确认网卡已配置 IP 地址\n");
+                printf("    ! No IPv4-mapped GID found, please verify the NIC has an IP address configured\n");
             }
         }
 
-        /* 关闭设备 */
+        /* Close device */
         ibv_close_device(ctx);
     }
 
-    /* 打印 ah_attr 差异指南 */
+    /* Print ah_attr difference guide */
     print_ah_attr_guide();
 
 cleanup:
@@ -297,6 +297,6 @@ cleanup:
         ibv_free_device_list(dev_list);
     }
 
-    printf("查询完成。\n");
+    printf("Query complete.\n");
     return (ret < 0) ? 1 : 0;
 }

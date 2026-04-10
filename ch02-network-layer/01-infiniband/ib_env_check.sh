@@ -1,120 +1,120 @@
 #!/bin/bash
 #
-# IB (InfiniBand) 环境检查脚本
+# IB (InfiniBand) Environment Check Script
 #
-# 功能：
-#   - 检查 IB 相关命令是否存在 (ibstat, ibv_devinfo, sminfo)
-#   - 列出所有 RDMA 设备
-#   - 显示设备详细信息
-#   - 检查 Subnet Manager 状态
-#   - 显示端口状态、LID、速率
-#   - 显示 GID 表内容
+# Features:
+#   - Check if IB-related commands exist (ibstat, ibv_devinfo, sminfo)
+#   - List all RDMA devices
+#   - Display detailed device information
+#   - Check Subnet Manager status
+#   - Display port state, LID, speed
+#   - Display GID table contents
 #
-# 用法: chmod +x ib_env_check.sh && ./ib_env_check.sh
+# Usage: chmod +x ib_env_check.sh && ./ib_env_check.sh
 #
 set -e
 
-# ========== 颜色定义 ==========
+# ========== Color Definitions ==========
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
-NC='\033[0m'  # 无颜色 (恢复默认)
+NC='\033[0m'  # No Color (reset to default)
 
-# ========== 辅助函数 ==========
+# ========== Helper Functions ==========
 
-# 打印通过信息
+# Print pass message
 pass() {
     echo -e "  [${GREEN}PASS${NC}] $1"
 }
 
-# 打印失败信息
+# Print fail message
 fail() {
     echo -e "  [${RED}FAIL${NC}] $1"
 }
 
-# 打印警告信息
+# Print warning message
 warn() {
     echo -e "  [${YELLOW}WARN${NC}] $1"
 }
 
-# 打印信息
+# Print info message
 info() {
     echo -e "  [${BLUE}INFO${NC}] $1"
 }
 
-# 打印分隔线
+# Print separator line
 separator() {
     echo -e "\n${CYAN}========== $1 ==========${NC}\n"
 }
 
-# ========== 1. 检查命令是否存在 ==========
-separator "1. 检查 IB 工具命令"
+# ========== 1. Check if commands exist ==========
+separator "1. Check IB Tool Commands"
 
-# 检查 ibstat 命令
+# Check ibstat command
 if command -v ibstat &>/dev/null; then
-    pass "ibstat 命令存在: $(which ibstat)"
+    pass "ibstat command exists: $(which ibstat)"
 else
-    warn "ibstat 命令不存在 (infiniband-diags 包未安装)"
+    warn "ibstat command not found (infiniband-diags package not installed)"
 fi
 
-# 检查 ibv_devinfo 命令
+# Check ibv_devinfo command
 if command -v ibv_devinfo &>/dev/null; then
-    pass "ibv_devinfo 命令存在: $(which ibv_devinfo)"
+    pass "ibv_devinfo command exists: $(which ibv_devinfo)"
 else
-    fail "ibv_devinfo 命令不存在 (请安装 libibverbs-utils 或 rdma-core)"
+    fail "ibv_devinfo command not found (please install libibverbs-utils or rdma-core)"
 fi
 
-# 检查 sminfo 命令
+# Check sminfo command
 if command -v sminfo &>/dev/null; then
-    pass "sminfo 命令存在: $(which sminfo)"
+    pass "sminfo command exists: $(which sminfo)"
 else
-    warn "sminfo 命令不存在 (infiniband-diags 包未安装，仅 IB 网络需要)"
+    warn "sminfo command not found (infiniband-diags package not installed, only needed for IB networks)"
 fi
 
-# 检查 ibv_devices 命令
+# Check ibv_devices command
 if command -v ibv_devices &>/dev/null; then
-    pass "ibv_devices 命令存在: $(which ibv_devices)"
+    pass "ibv_devices command exists: $(which ibv_devices)"
 else
-    fail "ibv_devices 命令不存在"
+    fail "ibv_devices command not found"
 fi
 
-# 检查 rdma 命令 (iproute2)
+# Check rdma command (iproute2)
 if command -v rdma &>/dev/null; then
-    pass "rdma 命令存在: $(which rdma)"
+    pass "rdma command exists: $(which rdma)"
 else
-    warn "rdma 命令不存在 (请安装 iproute2)"
+    warn "rdma command not found (please install iproute2)"
 fi
 
-# ========== 2. 列出所有 RDMA 设备 ==========
-separator "2. RDMA 设备列表 (ibv_devices)"
+# ========== 2. List all RDMA devices ==========
+separator "2. RDMA Device List (ibv_devices)"
 
 if command -v ibv_devices &>/dev/null; then
     output=$(ibv_devices 2>&1) || true
     if echo "$output" | grep -q "device"; then
-        pass "发现 RDMA 设备:"
+        pass "RDMA devices found:"
         echo "$output" | while IFS= read -r line; do
             echo -e "       $line"
         done
     else
-        fail "未发现任何 RDMA 设备"
-        echo -e "       ${YELLOW}提示: 请确认 RDMA 驱动已加载 (modprobe rdma_rxe / mlx5_ib)${NC}"
+        fail "No RDMA devices found"
+        echo -e "       ${YELLOW}Hint: Please verify RDMA drivers are loaded (modprobe rdma_rxe / mlx5_ib)${NC}"
     fi
 else
-    fail "无法执行 ibv_devices"
+    fail "Unable to execute ibv_devices"
 fi
 
-# ========== 3. 设备详细信息 ==========
-separator "3. 设备详细信息 (ibv_devinfo)"
+# ========== 3. Device detailed information ==========
+separator "3. Device Detailed Information (ibv_devinfo)"
 
 if command -v ibv_devinfo &>/dev/null; then
     output=$(ibv_devinfo 2>&1) || true
     if [ -n "$output" ]; then
-        pass "设备详细信息:"
+        pass "Device detailed information:"
         echo "$output" | while IFS= read -r line; do
-            # 高亮关键字段
+            # Highlight key fields
             if echo "$line" | grep -q "transport:"; then
                 echo -e "       ${BOLD}$line${NC}"
             elif echo "$line" | grep -q "state:"; then
@@ -130,62 +130,62 @@ if command -v ibv_devinfo &>/dev/null; then
             fi
         done
     else
-        fail "ibv_devinfo 无输出"
+        fail "ibv_devinfo produced no output"
     fi
 else
-    fail "无法执行 ibv_devinfo"
+    fail "Unable to execute ibv_devinfo"
 fi
 
-# ========== 4. Subnet Manager 状态检查 ==========
-separator "4. Subnet Manager (SM) 状态"
+# ========== 4. Subnet Manager status check ==========
+separator "4. Subnet Manager (SM) Status"
 
 sm_found=false
 
-# 方法 1: 使用 sminfo
+# Method 1: Use sminfo
 if command -v sminfo &>/dev/null; then
-    info "尝试使用 sminfo 查询 SM 状态..."
+    info "Attempting to query SM status using sminfo..."
     output=$(sminfo 2>&1) || true
     if echo "$output" | grep -q "SM"; then
-        pass "Subnet Manager 信息:"
+        pass "Subnet Manager information:"
         echo -e "       $output"
         sm_found=true
     else
-        warn "sminfo 查询失败 (可能不是 IB 网络): $output"
+        warn "sminfo query failed (may not be an IB network): $output"
     fi
 fi
 
-# 方法 2: 使用 ibstat
+# Method 2: Use ibstat
 if ! $sm_found && command -v ibstat &>/dev/null; then
-    info "尝试使用 ibstat 查询..."
+    info "Attempting to query using ibstat..."
     output=$(ibstat 2>&1) || true
     if [ -n "$output" ]; then
-        pass "ibstat 输出:"
+        pass "ibstat output:"
         echo "$output" | while IFS= read -r line; do
             echo -e "       $line"
         done
     else
-        warn "ibstat 无输出"
+        warn "ibstat produced no output"
     fi
 fi
 
 if ! $sm_found; then
-    info "SM 仅在 InfiniBand 网络中需要，RoCE/iWARP 不需要 SM"
+    info "SM is only needed for InfiniBand networks; RoCE/iWARP do not require SM"
 fi
 
-# ========== 5. 端口状态、LID、速率 ==========
-separator "5. 端口状态详情"
+# ========== 5. Port state, LID, speed ==========
+separator "5. Port Status Details"
 
-# 遍历 /sys/class/infiniband/ 下所有设备和端口
+# Traverse all devices and ports under /sys/class/infiniband/
 if [ -d /sys/class/infiniband ]; then
     for dev_dir in /sys/class/infiniband/*/; do
         dev_name=$(basename "$dev_dir")
-        echo -e "  ${BOLD}设备: $dev_name${NC}"
+        echo -e "  ${BOLD}Device: $dev_name${NC}"
 
         for port_dir in "$dev_dir"/ports/*/; do
             [ -d "$port_dir" ] || continue
             port_num=$(basename "$port_dir")
 
-            # 读取端口状态
+            # Read port status
             state=$(cat "$port_dir/state" 2>/dev/null || echo "unknown")
             lid=$(cat "$port_dir/lid" 2>/dev/null || echo "N/A")
             sm_lid=$(cat "$port_dir/sm_lid" 2>/dev/null || echo "N/A")
@@ -193,29 +193,29 @@ if [ -d /sys/class/infiniband ]; then
             link_layer=$(cat "$port_dir/link_layer" 2>/dev/null || echo "N/A")
             phys_state=$(cat "$port_dir/phys_state" 2>/dev/null || echo "N/A")
 
-            echo -e "    端口 ${port_num}:"
+            echo -e "    Port ${port_num}:"
 
-            # 状态判断
+            # State check
             if echo "$state" | grep -q "ACTIVE"; then
-                echo -e "      状态:      ${GREEN}${state}${NC}"
+                echo -e "      State:       ${GREEN}${state}${NC}"
             else
-                echo -e "      状态:      ${RED}${state}${NC}"
+                echo -e "      State:       ${RED}${state}${NC}"
             fi
 
-            echo -e "      物理状态:  ${phys_state}"
-            echo -e "      LID:       ${lid}"
-            echo -e "      SM LID:    ${sm_lid}"
-            echo -e "      速率:      ${rate}"
-            echo -e "      链路层:    ${CYAN}${link_layer}${NC}"
+            echo -e "      Phys State:  ${phys_state}"
+            echo -e "      LID:         ${lid}"
+            echo -e "      SM LID:      ${sm_lid}"
+            echo -e "      Speed:       ${rate}"
+            echo -e "      Link Layer:  ${CYAN}${link_layer}${NC}"
         done
         echo ""
     done
 else
-    fail "/sys/class/infiniband/ 目录不存在，未加载 RDMA 驱动"
+    fail "/sys/class/infiniband/ directory does not exist, RDMA driver not loaded"
 fi
 
-# ========== 6. GID 表内容 ==========
-separator "6. GID 表内容"
+# ========== 6. GID table contents ==========
+separator "6. GID Table Contents"
 
 if [ -d /sys/class/infiniband ]; then
     for dev_dir in /sys/class/infiniband/*/; do
@@ -228,7 +228,7 @@ if [ -d /sys/class/infiniband ]; then
 
             [ -d "$gid_dir" ] || continue
 
-            echo -e "  ${BOLD}${dev_name} / 端口 ${port_num} GID 表:${NC}"
+            echo -e "  ${BOLD}${dev_name} / Port ${port_num} GID Table:${NC}"
 
             gid_count=0
             for gid_file in "$gid_dir"/*; do
@@ -236,7 +236,7 @@ if [ -d /sys/class/infiniband ]; then
                 gid_index=$(basename "$gid_file")
                 gid_value=$(cat "$gid_file" 2>/dev/null || echo "")
 
-                # 跳过全零 GID
+                # Skip all-zero GIDs
                 if [ -n "$gid_value" ] && [ "$gid_value" != "0000:0000:0000:0000:0000:0000:0000:0000" ]; then
                     echo -e "    GID[${gid_index}] = ${GREEN}${gid_value}${NC}"
                     gid_count=$((gid_count + 1))
@@ -244,19 +244,19 @@ if [ -d /sys/class/infiniband ]; then
             done
 
             if [ "$gid_count" -eq 0 ]; then
-                warn "端口 ${port_num} 无有效 GID 条目"
+                warn "Port ${port_num} has no valid GID entries"
             else
-                info "端口 ${port_num} 共 ${gid_count} 个有效 GID"
+                info "Port ${port_num} has ${gid_count} valid GID(s)"
             fi
             echo ""
         done
     done
 else
-    fail "无法读取 GID 表"
+    fail "Unable to read GID table"
 fi
 
-# ========== 总结 ==========
-separator "检查完成"
-info "本脚本检查了 InfiniBand 环境的基本状态"
-info "如果你使用的是 RoCE 环境，请运行 ../02-roce/roce_env_check.sh"
-info "如果你使用的是 iWARP 环境，请运行 ../03-iwarp/iwarp_env_check.sh"
+# ========== Summary ==========
+separator "Check Complete"
+info "This script checked the basic status of the InfiniBand environment"
+info "If you are using a RoCE environment, please run ../02-roce/roce_env_check.sh"
+info "If you are using an iWARP environment, please run ../03-iwarp/iwarp_env_check.sh"

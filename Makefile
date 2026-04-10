@@ -1,55 +1,55 @@
-# RDMA 101 教程 - 根 Makefile
+# RDMA 101 Tutorial - Root Makefile
 #
-# 使用方法:
-#   make all       - 编译所有示例程序
-#   make clean     - 清理所有编译产物
-#   make common    - 仅编译公共库
-#   make setup     - 一键配置 SoftRoCE 环境 (需要 sudo)
-#   make test      - 运行全量测试 (需要 SoftRoCE)
-#   make check-env - 检查 RDMA 环境状态
+# Usage:
+#   make all       - Build all example programs
+#   make clean     - Clean all build artifacts
+#   make common    - Build common library only
+#   make setup     - One-click SoftRoCE environment setup (requires sudo)
+#   make test      - Run full test suite (requires SoftRoCE)
+#   make check-env - Check RDMA environment status
 
 CC = gcc
 CFLAGS = -Wall -O2 -g
 LDFLAGS = -libverbs
 
-# 先编译公共库，再编译各章节
+# Build common library first, then each chapter
 all: common chapters
 
-# 公共工具库 (所有程序的依赖)
+# Common utility library (dependency for all programs)
 common:
 	$(MAKE) -C common
 
-# 各章节按顺序编译
+# Build chapters in order
 chapters: common
-	@echo "=== 编译 ch00-prerequisites ==="
+	@echo "=== Building ch00-prerequisites ==="
 	-$(MAKE) -C ch00-prerequisites
-	@echo "=== 编译 ch02-network-layer ==="
+	@echo "=== Building ch02-network-layer ==="
 	-$(MAKE) -C ch02-network-layer/01-infiniband
 	-$(MAKE) -C ch02-network-layer/02-roce
 	-$(MAKE) -C ch02-network-layer/03-iwarp
 	-$(MAKE) -C ch02-network-layer/04-verbs-abstraction
-	@echo "=== 编译 ch03-verbs-api ==="
+	@echo "=== Building ch03-verbs-api ==="
 	-$(MAKE) -C ch03-verbs-api/01-initialization
 	-$(MAKE) -C ch03-verbs-api/02-qp-state
 	-$(MAKE) -C ch03-verbs-api/03-pd
 	-$(MAKE) -C ch03-verbs-api/04-mr
 	-$(MAKE) -C ch03-verbs-api/05-cq
-	@echo "=== 编译 ch05-communication ==="
+	@echo "=== Building ch05-communication ==="
 	-$(MAKE) -C ch05-communication/01-rdma-write
 	-$(MAKE) -C ch05-communication/02-send-recv
 	-$(MAKE) -C ch05-communication/03-rdma-read
 	-$(MAKE) -C ch05-communication/04-atomic
-	@echo "=== 编译 ch06-connection ==="
+	@echo "=== Building ch06-connection ==="
 	-$(MAKE) -C ch06-connection/01-manual-connect
 	-$(MAKE) -C ch06-connection/02-rdma-cm
 	-$(MAKE) -C ch06-connection/03-ud-mode
-	@echo "=== 编译 ch07-engineering ==="
+	@echo "=== Building ch07-engineering ==="
 	-$(MAKE) -C ch07-engineering/02-tuning
 	-$(MAKE) -C ch07-engineering/04-error-handling
-	@echo "=== 编译 ch09-quickref ==="
+	@echo "=== Building ch09-quickref ==="
 	-$(MAKE) -C ch09-quickref
 	@echo ""
-	@echo "=== 编译完成 ==="
+	@echo "=== Build complete ==="
 
 clean:
 	$(MAKE) -C common clean
@@ -76,19 +76,19 @@ clean:
 
 .PHONY: all common chapters clean setup test check-env
 
-# ========== SoftRoCE 快捷命令 ==========
+# ========== SoftRoCE Shortcuts ==========
 
-# 一键配置 SoftRoCE 环境
+# One-click SoftRoCE environment setup
 setup:
-	@echo "=== 配置 SoftRoCE 环境 ==="
+	@echo "=== Setting up SoftRoCE environment ==="
 	@sudo ./scripts/setup_softrce.sh
 
-# 运行全量测试
+# Run full test suite
 test: all
-	@echo "=== 运行全量测试 ==="
+	@echo "=== Running full test suite ==="
 	@./scripts/run_all_tests.sh
 
-# 检查环境状态
+# Check environment status
 check-env:
-	@echo "=== 检查 RDMA 环境 ==="
+	@echo "=== Checking RDMA environment ==="
 	@./ch09-quickref/env_check.sh

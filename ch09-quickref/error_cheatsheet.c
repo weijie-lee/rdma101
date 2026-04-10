@@ -1,24 +1,24 @@
 /**
- * RDMA WC 错误码速查工具 (纯 printf 版本，无需 RDMA 头文件)
+ * RDMA WC Error Code Lookup Tool (pure printf version, no RDMA headers needed)
  *
- * 功能:
- *   - 不带参数: 打印所有常见 WC 状态码的详细说明
- *   - 带参数:   查询指定错误码 (支持数值和名称)
+ * Function:
+ *   - No arguments: print detailed descriptions of all common WC status codes
+ *   - With argument: query a specific error code (supports numeric and name)
  *
- * 用法:
- *   ./error_cheatsheet                          # 打印全部错误码
- *   ./error_cheatsheet 12                       # 查询指定错误码 (数值)
- *   ./error_cheatsheet IBV_WC_RETRY_EXC_ERR     # 查询指定错误 (名称)
- *   ./error_cheatsheet RETRY_EXC_ERR            # 支持简写 (省略 IBV_WC_ 前缀)
- *   ./error_cheatsheet RETRY                    # 模糊搜索
+ * Usage:
+ *   ./error_cheatsheet                          # Print all error codes
+ *   ./error_cheatsheet 12                       # Query by error code (numeric)
+ *   ./error_cheatsheet IBV_WC_RETRY_EXC_ERR     # Query by error name
+ *   ./error_cheatsheet RETRY_EXC_ERR            # Abbreviated (omit IBV_WC_ prefix)
+ *   ./error_cheatsheet RETRY                    # Fuzzy search
  *
- * 每个错误包含:
- *   - 错误码数值和枚举名称 (IBV_WC_*)
- *   - 中文含义/描述
- *   - 最常见的 3 个原因
- *   - 修复建议
+ * Each error includes:
+ *   - Error code value and enum name (IBV_WC_*)
+ *   - Meaning/description
+ *   - Top 3 most common causes
+ *   - Fix suggestions
  *
- * 编译 (无需 libibverbs):
+ * Build (no libibverbs needed):
  *   gcc -Wall -O2 -g -o error_cheatsheet error_cheatsheet.c
  */
 
@@ -26,217 +26,217 @@
 #include <stdlib.h>     /* strtol */
 #include <string.h>     /* strcmp, strcasecmp, strcasestr, strlen */
 
-/* ========== 终端颜色定义 ========== */
-#define CLR_RED     "\033[0;31m"    /* 红色 (错误) */
-#define CLR_GREEN   "\033[0;32m"    /* 绿色 (成功) */
-#define CLR_YELLOW  "\033[1;33m"    /* 黄色 (原因) */
-#define CLR_BLUE    "\033[0;34m"    /* 蓝色 (修复) */
-#define CLR_CYAN    "\033[0;36m"    /* 青色 (标题) */
-#define CLR_BOLD    "\033[1m"       /* 粗体 */
-#define CLR_RESET   "\033[0m"       /* 重置 */
+/* ========== Terminal Color Definitions ========== */
+#define CLR_RED     "\033[0;31m"    /* Red (error) */
+#define CLR_GREEN   "\033[0;32m"    /* Green (success) */
+#define CLR_YELLOW  "\033[1;33m"    /* Yellow (cause) */
+#define CLR_BLUE    "\033[0;34m"    /* Blue (fix) */
+#define CLR_CYAN    "\033[0;36m"    /* Cyan (title) */
+#define CLR_BOLD    "\033[1m"       /* Bold */
+#define CLR_RESET   "\033[0m"       /* Reset */
 
-/* ========== 错误条目结构体 ========== */
+/* ========== Error Entry Structure ========== */
 struct error_entry {
-    int         code;           /* 状态码数值 */
-    const char *name;           /* 枚举名称 (IBV_WC_*) */
-    const char *meaning_cn;     /* 中文含义 */
-    const char *cause1;         /* 常见原因 1 */
-    const char *cause2;         /* 常见原因 2 */
-    const char *cause3;         /* 常见原因 3 */
-    const char *fix;            /* 修复建议 */
+    int         code;           /* Status code value */
+    const char *name;           /* Enum name (IBV_WC_*) */
+    const char *meaning;        /* Meaning */
+    const char *cause1;         /* Common cause 1 */
+    const char *cause2;         /* Common cause 2 */
+    const char *cause3;         /* Common cause 3 */
+    const char *fix;            /* Fix suggestion */
 };
 
-/* ========== 所有 WC 状态码定义 (硬编码，无需 infiniband/verbs.h) ========== */
+/* ========== All WC Status Code Definitions (hardcoded, no infiniband/verbs.h needed) ========== */
 static const struct error_entry errors[] = {
-    /* --- 0: 成功 --- */
+    /* --- 0: Success --- */
     {
         .code       = 0,
         .name       = "IBV_WC_SUCCESS",
-        .meaning_cn = "操作成功完成",
-        .cause1     = "这不是错误，表示 WR 已被 HCA 成功处理",
-        .cause2     = "Send/Recv/RDMA Read/Write/Atomic 均正常完成",
-        .cause3     = "数据已可靠地发送或接收到目标缓冲区",
-        .fix        = "无需修复。检查 wc.byte_len (接收侧) 和 wc.opcode 获取详情。"
+        .meaning    = "Operation completed successfully",
+        .cause1     = "Not an error; indicates the WR was successfully processed by the HCA",
+        .cause2     = "Send/Recv/RDMA Read/Write/Atomic all completed normally",
+        .cause3     = "Data has been reliably sent or received into the target buffer",
+        .fix        = "No fix needed. Check wc.byte_len (recv side) and wc.opcode for details."
     },
-    /* --- 1: 本地长度错误 --- */
+    /* --- 1: Local length error --- */
     {
         .code       = 1,
         .name       = "IBV_WC_LOC_LEN_ERR",
-        .meaning_cn = "本地长度错误 — 数据长度超出限制",
-        .cause1     = "发送数据超过 QP 的 max_inline_data 或 path MTU 限制",
-        .cause2     = "接收缓冲区 (Recv WR 的 SGE) 太小，装不下收到的数据",
-        .cause3     = "SGE 的 length 字段设置不正确 (为 0 或超出 MR 范围)",
-        .fix        = "检查 SGE.length 值。Recv 缓冲区应 >= 发送数据大小。确认 path_mtu 设置。"
+        .meaning    = "Local length error - data length exceeds limit",
+        .cause1     = "Send data exceeds QP's max_inline_data or path MTU limit",
+        .cause2     = "Recv buffer (Recv WR's SGE) too small to hold received data",
+        .cause3     = "SGE length field set incorrectly (0 or exceeds MR range)",
+        .fix        = "Check SGE.length. Recv buffer should be >= send data size. Verify path_mtu."
     },
-    /* --- 2: 本地 QP 操作错误 --- */
+    /* --- 2: Local QP operation error --- */
     {
         .code       = 2,
         .name       = "IBV_WC_LOC_QP_OP_ERR",
-        .meaning_cn = "本地 QP 操作错误 — QP 配置或状态不正确",
-        .cause1     = "QP 未转换到 RTS 状态就执行了 ibv_post_send()",
-        .cause2     = "QP 类型不支持请求的操作 (如 UD QP 执行 RDMA Write)",
-        .cause3     = "发送操作的参数不合法 (如 num_sge=0、opcode 无效)",
-        .fix        = "确保 QP 在 RTS 状态再发送。用 ibv_query_qp() 检查 QP 状态。"
+        .meaning    = "Local QP operation error - QP config or state incorrect",
+        .cause1     = "QP not transitioned to RTS state before calling ibv_post_send()",
+        .cause2     = "QP type doesn't support the requested operation (e.g., UD QP doing RDMA Write)",
+        .cause3     = "Send operation parameters invalid (e.g., num_sge=0, invalid opcode)",
+        .fix        = "Ensure QP is in RTS state before sending. Use ibv_query_qp() to check QP state."
     },
-    /* --- 3: 本地 EEC 操作错误 (RD QP，极少见) --- */
+    /* --- 3: Local EEC operation error (RD QP, very rare) --- */
     {
         .code       = 3,
         .name       = "IBV_WC_LOC_EEC_OP_ERR",
-        .meaning_cn = "本地 EEC 操作错误 (RD QP 相关，极少见)",
-        .cause1     = "EEC (End-to-End Context) 状态不正确",
-        .cause2     = "仅在 RD (Reliable Datagram) QP 类型中出现",
-        .cause3     = "RD QP 极少使用，大多数环境不会遇到此错误",
-        .fix        = "如果你使用的是 RC QP，不应该看到此错误。检查 QP 类型。"
+        .meaning    = "Local EEC operation error (RD QP related, very rare)",
+        .cause1     = "EEC (End-to-End Context) state incorrect",
+        .cause2     = "Only occurs with RD (Reliable Datagram) QP type",
+        .cause3     = "RD QP is rarely used; most environments won't encounter this",
+        .fix        = "If using RC QP, you should not see this error. Check QP type."
     },
-    /* --- 4: 本地保护错误 --- */
+    /* --- 4: Local protection error --- */
     {
         .code       = 4,
         .name       = "IBV_WC_LOC_PROT_ERR",
-        .meaning_cn = "本地保护错误 — 内存访问权限不匹配",
-        .cause1     = "MR 注册时未包含 IBV_ACCESS_LOCAL_WRITE 但 NIC 需要写入本地",
-        .cause2     = "SGE 的 lkey 与实际 MR 不匹配 (使用了错误的 lkey)",
-        .cause3     = "访问的内存地址超出了 MR 注册的地址范围",
-        .fix        = "检查 ibv_reg_mr() 的 access_flags。接收操作必须有 LOCAL_WRITE。"
+        .meaning    = "Local protection error - memory access permission mismatch",
+        .cause1     = "MR registered without IBV_ACCESS_LOCAL_WRITE but NIC needs local write",
+        .cause2     = "SGE lkey doesn't match the actual MR (wrong lkey used)",
+        .cause3     = "Memory address accessed is outside the MR's registered range",
+        .fix        = "Check ibv_reg_mr() access_flags. Recv operations must have LOCAL_WRITE."
     },
-    /* --- 5: WR 冲刷 --- */
+    /* --- 5: WR flushed --- */
     {
         .code       = 5,
         .name       = "IBV_WC_WR_FLUSH_ERR",
-        .meaning_cn = "WR 被冲刷 — QP 已进入 Error 状态",
-        .cause1     = "之前的某个操作出错，导致 QP 转入 Error 状态",
-        .cause2     = "Error 状态下所有未完成的 WR 都会被冲刷为此错误",
-        .cause3     = "对端断开连接或 QP 被 ibv_modify_qp 手动置为 Error",
-        .fix        = "★ FLUSH_ERR 不是根因! 找它之前的第一个非 FLUSH 错误。重置 QP 或重建连接。"
+        .meaning    = "WR flushed - QP has entered Error state",
+        .cause1     = "A previous operation failed, causing QP to transition to Error state",
+        .cause2     = "In Error state, all outstanding WRs are flushed with this error",
+        .cause3     = "Remote disconnected or QP manually set to Error via ibv_modify_qp",
+        .fix        = "FLUSH_ERR is NOT the root cause! Find the first non-FLUSH error before it. Reset QP or rebuild connection."
     },
-    /* --- 6: MW 绑定错误 --- */
+    /* --- 6: MW bind error --- */
     {
         .code       = 6,
         .name       = "IBV_WC_MW_BIND_ERR",
-        .meaning_cn = "Memory Window 绑定错误",
-        .cause1     = "MW 绑定操作的参数不合法",
-        .cause2     = "MR 不支持 MW 绑定 (注册时未指定 MW 绑定标志)",
-        .cause3     = "Memory Window 功能极少使用",
-        .fix        = "大多数程序不使用 MW。如使用，检查 MR 注册和 MW 绑定参数。"
+        .meaning    = "Memory Window bind error",
+        .cause1     = "MW bind operation parameters invalid",
+        .cause2     = "MR doesn't support MW binding (MW bind flag not specified at registration)",
+        .cause3     = "Memory Window feature is rarely used",
+        .fix        = "Most programs don't use MW. If using, check MR registration and MW bind parameters."
     },
-    /* --- 7: 坏响应 --- */
+    /* --- 7: Bad response --- */
     {
         .code       = 7,
         .name       = "IBV_WC_BAD_RESP_ERR",
-        .meaning_cn = "收到意外/损坏的响应包",
-        .cause1     = "响应包与期望的操作类型不匹配",
-        .cause2     = "网络中存在数据损坏 (CRC 校验失败等)",
-        .cause3     = "对端 HCA 固件 bug 或硬件故障",
-        .fix        = "检查网络链路质量 (ibstatus, perfquery)。可能需要更换网线/光纤。"
+        .meaning    = "Received unexpected/corrupted response packet",
+        .cause1     = "Response packet doesn't match expected operation type",
+        .cause2     = "Data corruption on the network (CRC check failure, etc.)",
+        .cause3     = "Remote HCA firmware bug or hardware failure",
+        .fix        = "Check network link quality (ibstatus, perfquery). May need to replace cable/fiber."
     },
-    /* --- 8: 本地访问错误 --- */
+    /* --- 8: Local access error --- */
     {
         .code       = 8,
         .name       = "IBV_WC_LOC_ACCESS_ERR",
-        .meaning_cn = "本地访问错误 — lkey 无效或 MR 已注销",
-        .cause1     = "使用了已被 ibv_dereg_mr() 注销的 MR 的 lkey",
-        .cause2     = "lkey 值错误 (打字错误或使用了其他 MR 的 lkey)",
-        .cause3     = "MR 注册的地址范围不包含 SGE 指定的地址区间",
-        .fix        = "确认 SGE.lkey 对应正确的、未注销的 MR。检查地址范围。"
+        .meaning    = "Local access error - lkey invalid or MR already deregistered",
+        .cause1     = "Used lkey from an MR that was already deregistered via ibv_dereg_mr()",
+        .cause2     = "lkey value wrong (typo or used lkey from a different MR)",
+        .cause3     = "MR registered address range doesn't cover the SGE specified range",
+        .fix        = "Ensure SGE.lkey corresponds to the correct, still-registered MR. Check address range."
     },
-    /* --- 9: 远端无效请求 --- */
+    /* --- 9: Remote invalid request --- */
     {
         .code       = 9,
         .name       = "IBV_WC_REM_INV_REQ_ERR",
-        .meaning_cn = "远端无效请求 — 对端认为请求不合法",
-        .cause1     = "RDMA Write/Read 的目标地址超出对端 MR 注册范围",
-        .cause2     = "请求的操作类型对端 QP 不支持 (如 Atomic 但对端未启用)",
-        .cause3     = "建连参数错误导致请求被误路由 (dest_qp_num 不匹配)",
-        .fix        = "打印两端的 rdma_endpoint 信息逐项对比。检查 remote_addr + length 范围。"
+        .meaning    = "Remote invalid request - remote considers request illegal",
+        .cause1     = "RDMA Write/Read target address outside remote MR registered range",
+        .cause2     = "Requested operation type not supported by remote QP (e.g., Atomic not enabled)",
+        .cause3     = "Connection parameters wrong causing request misrouting (dest_qp_num mismatch)",
+        .fix        = "Print and compare rdma_endpoint info on both sides. Check remote_addr + length range."
     },
-    /* --- 10: 远端访问错误 --- */
+    /* --- 10: Remote access error --- */
     {
         .code       = 10,
         .name       = "IBV_WC_REM_ACCESS_ERR",
-        .meaning_cn = "远端访问错误 — 对端 MR 权限不足",
-        .cause1     = "RDMA Write 但对端 MR 未设置 IBV_ACCESS_REMOTE_WRITE",
-        .cause2     = "RDMA Read 但对端 MR 未设置 IBV_ACCESS_REMOTE_READ",
-        .cause3     = "Atomic 但对端 MR 未设 REMOTE_ATOMIC; 或 rkey 不匹配/已失效",
-        .fix        = "确保对端 ibv_reg_mr() 包含对应的 REMOTE_* 权限。检查 rkey 交换。"
+        .meaning    = "Remote access error - remote MR permissions insufficient",
+        .cause1     = "RDMA Write but remote MR missing IBV_ACCESS_REMOTE_WRITE",
+        .cause2     = "RDMA Read but remote MR missing IBV_ACCESS_REMOTE_READ",
+        .cause3     = "Atomic but remote MR missing REMOTE_ATOMIC; or rkey mismatch/expired",
+        .fix        = "Ensure remote ibv_reg_mr() includes corresponding REMOTE_* permissions. Check rkey exchange."
     },
-    /* --- 11: 远端操作错误 --- */
+    /* --- 11: Remote operation error --- */
     {
         .code       = 11,
         .name       = "IBV_WC_REM_OP_ERR",
-        .meaning_cn = "远端操作错误 — 对端内部处理失败",
-        .cause1     = "对端 HCA 处理请求时遇到内部错误",
-        .cause2     = "对端 QP 已进入 Error 状态",
-        .cause3     = "对端资源不足 (如 SRQ 溢出、内存映射失效)",
-        .fix        = "检查对端的 dmesg 和 QP 状态。对端程序可能已 crash。"
+        .meaning    = "Remote operation error - remote internal processing failed",
+        .cause1     = "Remote HCA encountered internal error processing the request",
+        .cause2     = "Remote QP has entered Error state",
+        .cause3     = "Remote resource exhaustion (e.g., SRQ overflow, memory mapping invalidated)",
+        .fix        = "Check remote dmesg and QP state. Remote program may have crashed."
     },
-    /* --- 12: 重传超限 --- */
+    /* --- 12: Retry exceeded --- */
     {
         .code       = 12,
         .name       = "IBV_WC_RETRY_EXC_ERR",
-        .meaning_cn = "重传次数超限 — 网络不通或对端不可达",
-        .cause1     = "网络物理连接断开 (网线/光纤/交换机故障)",
-        .cause2     = "对端程序已退出、机器已关机或 QP 已被销毁",
-        .cause3     = "建连参数错误: dest_qp_num / LID / GID 不正确",
-        .fix        = "1) ping 对端确认网络通 2) ibstatus 检查端口 3) 打印两端端点信息对比"
+        .meaning    = "Retry count exceeded - network unreachable or remote down",
+        .cause1     = "Physical network connection broken (cable/fiber/switch failure)",
+        .cause2     = "Remote program exited, machine powered off, or QP destroyed",
+        .cause3     = "Connection parameters wrong: dest_qp_num / LID / GID incorrect",
+        .fix        = "1) Ping remote to confirm network 2) ibstatus to check port 3) Print and compare endpoint info"
     },
-    /* --- 13: RNR 重试超限 --- */
+    /* --- 13: RNR retry exceeded --- */
     {
         .code       = 13,
         .name       = "IBV_WC_RNR_RETRY_EXC_ERR",
-        .meaning_cn = "RNR 重试超限 — 对端没有 Post Recv (接收队列为空)",
-        .cause1     = "★ 最常见: 对端忘记 ibv_post_recv() 就被 Send 了数据",
-        .cause2     = "对端 Recv WR 消耗完了，没有及时补充",
-        .cause3     = "rnr_retry 设置为 0 (不重试)，应设为 7 (无限重试)",
-        .fix        = "确保接收端先 Post Recv 再让发送端 Post Send。设置 rnr_retry=7。"
+        .meaning    = "RNR retry exceeded - remote has no Posted Recv (recv queue empty)",
+        .cause1     = "Most common: remote forgot ibv_post_recv() before data was sent",
+        .cause2     = "Remote Recv WRs consumed and not replenished in time",
+        .cause3     = "rnr_retry set to 0 (no retry); should be set to 7 (infinite retry)",
+        .fix        = "Ensure receiver Posts Recv before sender Posts Send. Set rnr_retry=7."
     },
-    /* --- 14: 本地 RDD 违规 (RD QP，极少见) --- */
+    /* --- 14: Local RDD violation (RD QP, very rare) --- */
     {
         .code       = 14,
         .name       = "IBV_WC_LOC_RDD_VIOL_ERR",
-        .meaning_cn = "本地 RDD 违规 (RD QP 相关，极少见)",
-        .cause1     = "RD QP 的 Reliable Datagram Domain 不匹配",
-        .cause2     = "仅在 RD QP 类型中出现",
-        .cause3     = "绝大多数环境不支持 RD QP",
-        .fix        = "不使用 RD QP 就不会遇到此错误。"
+        .meaning    = "Local RDD violation (RD QP related, very rare)",
+        .cause1     = "RD QP Reliable Datagram Domain mismatch",
+        .cause2     = "Only occurs with RD QP type",
+        .cause3     = "Most environments don't support RD QP",
+        .fix        = "You won't encounter this if not using RD QP."
     },
-    /* --- 15: 远端无效 RD 请求 --- */
+    /* --- 15: Remote invalid RD request --- */
     {
         .code       = 15,
         .name       = "IBV_WC_REM_INV_RD_REQ_ERR",
-        .meaning_cn = "远端无效 RD 请求 (RD QP 相关，极少见)",
-        .cause1     = "远端 RD 请求参数不合法",
-        .cause2     = "仅在 RD QP 类型中出现",
-        .cause3     = "绝大多数环境不支持 RD QP",
-        .fix        = "不使用 RD QP 就不会遇到此错误。"
+        .meaning    = "Remote invalid RD request (RD QP related, very rare)",
+        .cause1     = "Remote RD request parameters invalid",
+        .cause2     = "Only occurs with RD QP type",
+        .cause3     = "Most environments don't support RD QP",
+        .fix        = "You won't encounter this if not using RD QP."
     },
-    /* --- 19: 致命错误 --- */
+    /* --- 19: Fatal error --- */
     {
         .code       = 19,
         .name       = "IBV_WC_FATAL_ERR",
-        .meaning_cn = "致命错误 — HCA 硬件故障",
-        .cause1     = "HCA (网卡) 硬件内部不可恢复错误",
-        .cause2     = "HCA 固件 (firmware) crash 或异常",
-        .cause3     = "PCIe 总线错误或供电不稳定",
-        .fix        = "检查 dmesg 查看硬件错误日志。尝试重启驱动。可能需要更换网卡。"
+        .meaning    = "Fatal error - HCA hardware failure",
+        .cause1     = "HCA (NIC) internal unrecoverable hardware error",
+        .cause2     = "HCA firmware crash or anomaly",
+        .cause3     = "PCIe bus error or unstable power supply",
+        .fix        = "Check dmesg for hardware error logs. Try restarting driver. May need to replace NIC."
     },
-    /* --- 20: 响应超时 --- */
+    /* --- 20: Response timeout --- */
     {
         .code       = 20,
         .name       = "IBV_WC_RESP_TIMEOUT_ERR",
-        .meaning_cn = "响应超时 — 等待对端响应超时",
-        .cause1     = "类似 RETRY_EXC_ERR，对端响应超时",
-        .cause2     = "网络拥塞严重导致延迟超过超时阈值",
-        .cause3     = "QP RTR→RTS 时的 timeout 参数设置过小",
-        .fix        = "增大 timeout 参数 (如从 14 → 18)。检查网络延迟和丢包率。"
+        .meaning    = "Response timeout - timed out waiting for remote response",
+        .cause1     = "Similar to RETRY_EXC_ERR, remote response timed out",
+        .cause2     = "Severe network congestion causing latency to exceed timeout threshold",
+        .cause3     = "Timeout parameter in QP RTR->RTS set too small",
+        .fix        = "Increase timeout parameter (e.g., from 14 to 18). Check network latency and packet loss."
     },
 };
 
-/* 错误条目总数 */
+/* Total number of error entries */
 #define NUM_ERRORS  (sizeof(errors) / sizeof(errors[0]))
 
-/* ========== 打印单个错误条目 ========== */
+/* ========== Print a Single Error Entry ========== */
 static void print_error(const struct error_entry *e)
 {
-    /* 错误码名称和数值 (成功用绿色，错误用红色) */
+    /* Error code name and value (green for success, red for error) */
     if (e->code == 0) {
         printf(CLR_GREEN CLR_BOLD "  [%2d] %s" CLR_RESET "\n",
                e->code, e->name);
@@ -245,37 +245,37 @@ static void print_error(const struct error_entry *e)
                e->code, e->name);
     }
 
-    /* 中文含义 */
-    printf("       含义: %s\n", e->meaning_cn);
+    /* Meaning */
+    printf("       Meaning: %s\n", e->meaning);
 
-    /* 三个常见原因 */
+    /* Three common causes */
     printf(CLR_YELLOW);
-    printf("       原因 1: %s\n", e->cause1);
-    printf("       原因 2: %s\n", e->cause2);
-    printf("       原因 3: %s\n", e->cause3);
+    printf("       Cause 1: %s\n", e->cause1);
+    printf("       Cause 2: %s\n", e->cause2);
+    printf("       Cause 3: %s\n", e->cause3);
     printf(CLR_RESET);
 
-    /* 修复建议 */
-    printf(CLR_BLUE "       修复: %s\n" CLR_RESET, e->fix);
+    /* Fix suggestion */
+    printf(CLR_BLUE "       Fix: %s\n" CLR_RESET, e->fix);
 
     printf("\n");
 }
 
-/* ========== 打印所有错误码 ========== */
+/* ========== Print All Error Codes ========== */
 static void print_all_errors(void)
 {
     printf("\n");
     printf(CLR_CYAN CLR_BOLD
            "============================================================\n"
-           "  RDMA WC (Work Completion) 错误码速查表\n"
-           "  共 %zu 种常见状态码 (纯查询版，无需 libibverbs)\n"
+           "  RDMA WC (Work Completion) Error Code Reference\n"
+           "  %zu common status codes (lookup version, no libibverbs needed)\n"
            "============================================================\n\n"
            CLR_RESET, NUM_ERRORS);
 
-    /* 先打印最常遇到的 5 个错误 */
-    printf(CLR_CYAN CLR_BOLD "--- 最常遇到的 5 个错误 ---\n\n" CLR_RESET);
+    /* Print the 5 most commonly encountered errors first */
+    printf(CLR_CYAN CLR_BOLD "--- Top 5 Most Common Errors ---\n\n" CLR_RESET);
 
-    int common_codes[] = {12, 13, 10, 5, 4};   /* 按实际频率排列 */
+    int common_codes[] = {12, 13, 10, 5, 4};   /* Ranked by actual frequency */
     for (int i = 0; i < 5; i++) {
         for (size_t j = 0; j < NUM_ERRORS; j++) {
             if (errors[j].code == common_codes[i]) {
@@ -285,34 +285,34 @@ static void print_all_errors(void)
         }
     }
 
-    /* 完整列表 */
-    printf(CLR_CYAN CLR_BOLD "--- 完整错误码列表 ---\n\n" CLR_RESET);
+    /* Full list */
+    printf(CLR_CYAN CLR_BOLD "--- Full Error Code List ---\n\n" CLR_RESET);
 
     for (size_t i = 0; i < NUM_ERRORS; i++) {
         print_error(&errors[i]);
     }
 
-    /* 调试技巧 */
+    /* Debug tips */
     printf(CLR_CYAN
            "============================================================\n"
-           "  调试技巧:\n"
-           "    1. 代码中用 ibv_wc_status_str(wc.status) 获取英文描述\n"
-           "    2. 用 print_wc_detail(&wc) 打印完整 WC 字段\n"
-           "    3. WR_FLUSH_ERR (5) 不是根因，找它之前的第一个错误\n"
-           "    4. wc.vendor_err 非零时包含厂商特定的错误细节\n"
-           "    5. RETRY_EXC (12) 和 RNR_RETRY_EXC (13) 是最常见的两个错误\n"
+           "  Debug Tips:\n"
+           "    1. Use ibv_wc_status_str(wc.status) in code for English description\n"
+           "    2. Use print_wc_detail(&wc) to print all WC fields\n"
+           "    3. WR_FLUSH_ERR (5) is not the root cause; find the first error before it\n"
+           "    4. Non-zero wc.vendor_err contains vendor-specific error details\n"
+           "    5. RETRY_EXC (12) and RNR_RETRY_EXC (13) are the two most common errors\n"
            "============================================================\n"
            CLR_RESET "\n");
 }
 
-/* ========== 按数值或名称查询指定错误 ========== */
+/* ========== Search for a Specific Error by Number or Name ========== */
 static int search_error(const char *query)
 {
-    /* 尝试解析为数值 */
+    /* Try to parse as numeric */
     char *endptr;
     long code = strtol(query, &endptr, 10);
     if (*endptr == '\0') {
-        /* 输入是数值 */
+        /* Input is numeric */
         for (size_t i = 0; i < NUM_ERRORS; i++) {
             if (errors[i].code == (int)code) {
                 printf("\n");
@@ -320,21 +320,21 @@ static int search_error(const char *query)
                 return 0;
             }
         }
-        fprintf(stderr, CLR_RED "未找到错误码: %ld\n" CLR_RESET, code);
-        fprintf(stderr, "有效的错误码数值: 0~15, 19, 20\n");
+        fprintf(stderr, CLR_RED "Error code not found: %ld\n" CLR_RESET, code);
+        fprintf(stderr, "Valid error code values: 0~15, 19, 20\n");
         return 1;
     }
 
-    /* 输入是名称 —— 支持完整名称和省略 IBV_WC_ 前缀的简写 */
+    /* Input is a name -- supports full name and abbreviated form without IBV_WC_ prefix */
     for (size_t i = 0; i < NUM_ERRORS; i++) {
-        /* 完整名称匹配 (不区分大小写) */
+        /* Full name match (case-insensitive) */
         if (strcasecmp(query, errors[i].name) == 0) {
             printf("\n");
             print_error(&errors[i]);
             return 0;
         }
 
-        /* 简写匹配: 省略 "IBV_WC_" 前缀 (7 个字符) */
+        /* Abbreviated match: omit "IBV_WC_" prefix (7 characters) */
         if (strlen(errors[i].name) > 7) {
             const char *short_name = errors[i].name + 7;
             if (strcasecmp(query, short_name) == 0) {
@@ -345,13 +345,13 @@ static int search_error(const char *query)
         }
     }
 
-    /* 模糊匹配: 子串搜索 */
+    /* Fuzzy match: substring search */
     int found = 0;
     for (size_t i = 0; i < NUM_ERRORS; i++) {
         if (strcasestr(errors[i].name, query) != NULL ||
-            strstr(errors[i].meaning_cn, query) != NULL) {
+            strstr(errors[i].meaning, query) != NULL) {
             if (!found) {
-                printf("\n" CLR_CYAN "模糊匹配结果:\n\n" CLR_RESET);
+                printf("\n" CLR_CYAN "Fuzzy match results:\n\n" CLR_RESET);
             }
             print_error(&errors[i]);
             found = 1;
@@ -360,39 +360,39 @@ static int search_error(const char *query)
 
     if (found) return 0;
 
-    /* 没找到 */
-    fprintf(stderr, CLR_RED "未找到匹配: %s\n" CLR_RESET, query);
-    fprintf(stderr, "用法:\n");
-    fprintf(stderr, "  ./error_cheatsheet                      # 打印全部\n");
-    fprintf(stderr, "  ./error_cheatsheet 12                   # 数值查询\n");
-    fprintf(stderr, "  ./error_cheatsheet IBV_WC_RETRY_EXC_ERR # 完整名称\n");
-    fprintf(stderr, "  ./error_cheatsheet RETRY                # 模糊搜索\n");
+    /* Not found */
+    fprintf(stderr, CLR_RED "No match found: %s\n" CLR_RESET, query);
+    fprintf(stderr, "Usage:\n");
+    fprintf(stderr, "  ./error_cheatsheet                      # Print all\n");
+    fprintf(stderr, "  ./error_cheatsheet 12                   # Numeric query\n");
+    fprintf(stderr, "  ./error_cheatsheet IBV_WC_RETRY_EXC_ERR # Full name\n");
+    fprintf(stderr, "  ./error_cheatsheet RETRY                # Fuzzy search\n");
     return 1;
 }
 
-/* ========== 主函数 ========== */
+/* ========== Main Function ========== */
 int main(int argc, char *argv[])
 {
     if (argc == 1) {
-        /* 无参数: 打印全部错误码 */
+        /* No arguments: print all error codes */
         print_all_errors();
         return 0;
     }
 
     if (argc == 2) {
-        /* 有参数: 查询指定错误码 */
+        /* One argument: query specific error code */
         return search_error(argv[1]);
     }
 
-    /* 参数过多 */
-    fprintf(stderr, "用法:\n");
-    fprintf(stderr, "  %s                          # 打印全部错误码\n", argv[0]);
-    fprintf(stderr, "  %s <错误名称或数值>          # 查询指定错误\n", argv[0]);
+    /* Too many arguments */
+    fprintf(stderr, "Usage:\n");
+    fprintf(stderr, "  %s                          # Print all error codes\n", argv[0]);
+    fprintf(stderr, "  %s <error name or number>    # Query specific error\n", argv[0]);
     fprintf(stderr, "\n");
-    fprintf(stderr, "示例:\n");
-    fprintf(stderr, "  %s 12                       # 按数值查询\n", argv[0]);
-    fprintf(stderr, "  %s IBV_WC_REM_ACCESS_ERR    # 完整名称\n", argv[0]);
-    fprintf(stderr, "  %s REM_ACCESS_ERR           # 省略 IBV_WC_ 前缀\n", argv[0]);
-    fprintf(stderr, "  %s RETRY                    # 模糊搜索\n", argv[0]);
+    fprintf(stderr, "Examples:\n");
+    fprintf(stderr, "  %s 12                       # Query by number\n", argv[0]);
+    fprintf(stderr, "  %s IBV_WC_REM_ACCESS_ERR    # Full name\n", argv[0]);
+    fprintf(stderr, "  %s REM_ACCESS_ERR           # Omit IBV_WC_ prefix\n", argv[0]);
+    fprintf(stderr, "  %s RETRY                    # Fuzzy search\n", argv[0]);
     return 1;
 }
